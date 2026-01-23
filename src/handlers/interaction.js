@@ -7,7 +7,8 @@ const {
   TextInputBuilder,
   TextInputStyle,
   PermissionFlagsBits,
-  StringSelectMenuBuilder
+  StringSelectMenuBuilder,
+  UserSelectMenuBuilder
 } = require('discord.js');
 const {
   incidentReasons,
@@ -26,6 +27,204 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   function isSteward(member) {
     return member.roles?.cache?.has(config.stewardRoleId);
   }
+
+  const buildIncidentModal = ({ raceName, round, description } = {}) => {
+    const modal = new ModalBuilder().setCustomId('incident_modal').setTitle('Race Incident Melding');
+
+    const raceInput = new TextInputBuilder()
+      .setCustomId('race_naam')
+      .setLabel('Welke race?')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+    if (raceName != null) raceInput.setValue(raceName);
+
+    const roundInput = new TextInputBuilder()
+      .setCustomId('ronde')
+      .setLabel('Welke ronde?')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+    if (round != null) roundInput.setValue(round);
+
+    const descriptionInput = new TextInputBuilder()
+      .setCustomId('beschrijving')
+      .setLabel('Beschrijving van het incident')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true);
+    if (description != null) descriptionInput.setValue(description);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(raceInput),
+      new ActionRowBuilder().addComponents(roundInput),
+      new ActionRowBuilder().addComponents(descriptionInput)
+    );
+
+    return modal;
+  };
+
+  const buildIncidentReviewEmbed = ({
+    incidentNumber,
+    raceName,
+    round,
+    description,
+    reasonLabel,
+    guiltyMention,
+    reporterTag
+  }) =>
+    new EmbedBuilder()
+      .setColor('#FFA000')
+      .setTitle(`✅ Controleer je incidentmelding - ${incidentNumber || 'Onbekend'}`)
+      .setDescription('Controleer je gegevens. Kies **Bewerken** om aan te passen of **Bevestigen** om te verzenden.')
+      .addFields(
+        { name: '🔢 Incidentnummer', value: incidentNumber || 'Onbekend', inline: true },
+        { name: '👤 Ingediend door', value: reporterTag || 'Onbekend', inline: true },
+        { name: '⚠️ Schuldige rijder', value: guiltyMention || 'Onbekend', inline: true },
+        { name: '📌 Reden', value: reasonLabel || 'Onbekend', inline: false },
+        { name: '🏁 Race', value: raceName || 'Onbekend', inline: true },
+        { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
+        { name: '📝 Beschrijving', value: description || 'Onbekend', inline: false }
+      );
+
+  const submitIncidentReport = async (interaction, pending) => {
+    const raceName = pending.raceName;
+    const round = pending.round;
+    const description = pending.description;
+    const evidence = 'Zie uploads';
+
+    if (!raceName || !round || !description) {
+      return interaction.editReply({
+        content: '❌ Je melding mist gegevens. Klik op **Bewerken** en vul alles opnieuw in.'
+      });
+    }
+
+    const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+    if (!voteChannel) {
+      return interaction.editReply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
+    }
+
+    const reasonValue = pending.reasonValue;
+    const reasonLabel = incidentReasons.find((r) => r.value === reasonValue)?.label || reasonValue;
+    const incidentNumber = pending.incidentNumber || generateIncidentNumber();
+
+    const guiltyDriver = pending.guiltyTag || 'Onbekend';
+    const guiltyMention = pending.guiltyId ? `<@${pending.guiltyId}>` : guiltyDriver;
+
+    const maxLabelNameLength = 24;
+    const truncateLabelName = (value) => {
+      if (!value) return 'Onbekend';
+      return value.length > maxLabelNameLength ? `${value.slice(0, maxLabelNameLength - 1)}…` : value;
+    };
+    const guiltyLabelName = truncateLabelName(guiltyDriver);
+    const reporterLabelName = truncateLabelName(pending.reporterTag);
+
+    const incidentEmbed = new EmbedBuilder()
+      .setColor('#FF6B00')
+      .setTitle(`🚨 Incident ${incidentNumber} - ${raceName}`)
+      .addFields(
+        { name: '🔢 Incidentnummer', value: incidentNumber, inline: true },
+        { name: '👤 Ingediend door', value: `${pending.reporterTag}`, inline: true },
+        { name: '🏁 Race', value: raceName, inline: true },
+        { name: '🔢 Ronde', value: round, inline: true },
+        { name: '⚠️ Schuldige rijder', value: guiltyMention || guiltyDriver, inline: true },
+        { name: '📌 Reden', value: reasonLabel },
+        { name: '📝 Beschrijving', value: description },
+        { name: '🎥 Bewijs', value: evidence },
+        { name: '📊 Tussenstand (Dader)', value: 'Nog geen stemmen.' },
+        { name: '📊 Tussenstand (Indiener)', value: 'Nog geen stemmen.' }
+      )
+      .setTimestamp();
+
+    const voteButtons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('vote_cat0').setLabel('Cat 0').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('vote_cat1').setLabel('Cat 1').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('vote_cat2').setLabel('Cat 2').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('vote_cat3').setLabel('Cat 3').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('vote_cat4').setLabel('Cat 4').setStyle(ButtonStyle.Secondary)
+    );
+
+    const voteButtonsRow2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('vote_cat5').setLabel('Cat 5').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('vote_plus').setLabel('+ Strafpunt').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('vote_minus').setLabel('- Strafpunt').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('finalize_votes').setLabel('✅ Incident afhandelen').setStyle(ButtonStyle.Danger)
+    );
+
+    const reporterSelect = new StringSelectMenuBuilder()
+      .setCustomId('vote_reporter_select')
+      .setPlaceholder(`Indiener: ${reporterLabelName}`)
+      .addOptions(
+        { label: 'Cat 0', value: 'cat0' },
+        { label: 'Cat 1', value: 'cat1' },
+        { label: 'Cat 2', value: 'cat2' },
+        { label: 'Cat 3', value: 'cat3' },
+        { label: 'Cat 4', value: 'cat4' },
+        { label: 'Cat 5', value: 'cat5' },
+        { label: '+ Strafpunt', value: 'plus' },
+        { label: '- Strafpunt', value: 'minus' }
+      );
+
+    const reporterSelectRow = new ActionRowBuilder().addComponents(reporterSelect);
+
+    const guiltySeparatorRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sep_schuldige')
+        .setLabel(`──────── ${guiltyLabelName} ────────`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true)
+    );
+
+    const reporterSeparatorRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sep_indiener')
+        .setLabel(`──────── ${reporterLabelName} ────────`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true)
+    );
+
+    const message = await voteChannel.send({
+      content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${raceName} (${round}) - Door ${pending.reporterTag}`,
+      embeds: [incidentEmbed],
+      components: [guiltySeparatorRow, voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterSelectRow]
+    });
+
+    activeIncidents.set(message.id, {
+      votes: {},
+      incidentNumber,
+      raceName,
+      round,
+      guiltyDriver,
+      reason: reasonLabel,
+      reporter: pending.reporterTag
+    });
+
+    let evidenceChannelId = interaction.channelId;
+    let evidenceLocation = 'dit kanaal';
+    try {
+      const dmChannel = await interaction.user.createDM();
+      evidenceChannelId = dmChannel.id;
+      evidenceLocation = 'je DM';
+      await dmChannel.send(
+        '✅ Je incident is verzonden naar de stewards.\n' +
+          `Incidentnummer: **${incidentNumber}**\n` +
+          `Upload je bewijsmateriaal voor **${incidentNumber}** in dit kanaal binnen 5 minuten om het automatisch toe te voegen.`
+      );
+    } catch {}
+
+    pendingEvidence.set(interaction.user.id, {
+      messageId: message.id,
+      channelId: evidenceChannelId,
+      expiresAt: Date.now() + evidenceWindowMs,
+      type: 'incident',
+      incidentNumber
+    });
+
+    pendingIncidentReports.delete(interaction.user.id);
+    await interaction.editReply({
+      content:
+        '✅ Je incident is verzonden naar de stewards!\n' +
+        `Incidentnummer: **${incidentNumber}**\n` +
+        `Upload je bewijsmateriaal voor **${incidentNumber}** in ${evidenceLocation} binnen 5 minuten om het automatisch toe te voegen.`
+    });
+  };
 
   client.once('ready', () => {
     console.log(`✅ Bot is online als ${client.user.tag}`);
@@ -70,8 +269,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               'Wil je een incident melden bij de stewards van DRE?',
               'Klik dan op de knop **Meld Incident**.',
               '',
-              'Er wordt automatisch een nieuwe privéchat (DM) gestart',
-              'waarin je het incident kunt toelichten.',
+              'Je doorloopt de stappen in dit kanaal.',
+              'Na het indienen ontvang je een DM voor bewijsmateriaal.',
               '',
               '⚠️ **Belangrijk**',
               'Zonder bewijsmateriaal kunnen wij een incident niet beoordelen.',
@@ -105,24 +304,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         const reasonRow = new ActionRowBuilder().addComponents(reasonSelect);
 
-        try {
-          const dmChannel = await interaction.user.createDM();
-          await dmChannel.send({
-            content:
-              'Vertel hier wat er is gebeurd en doorloop de stappen om het incident in te dienen.\n' +
-              'Je kunt een directe YouTube-link toevoegen of je eigen video’s uploaden.\n\n',
-            components: [reasonRow]
-          });
-          await interaction.reply({
-            content: '📩 Ik heb je een DM gestuurd om het incident te melden.',
-            ephemeral: true
-          });
-        } catch {
-          await interaction.reply({
-            content: '❌ Ik kan je geen DM sturen. Zet je DM open en probeer opnieuw.',
-            ephemeral: true
-          });
-        }
+        await interaction.reply({
+          content: 'Kies de reden van het incident. Daarna kun je de schuldige selecteren.',
+          components: [reasonRow],
+          ephemeral: true
+        });
         return;
       }
 
@@ -183,67 +369,111 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return;
       }
 
-      // 3) Dropdown submit: reden bewaren en modal tonen
+      // 3) Dropdown submit: reden bewaren en vraag om schuldige (User Select)
       if (interaction.isStringSelectMenu() && interaction.customId === 'incident_reason') {
-        if (interaction.guildId) {
-          return interaction.reply({ content: '❌ Meld een incident via de DM die je kreeg.', ephemeral: true });
+        if (!interaction.guildId) {
+          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', ephemeral: true });
         }
 
         pendingIncidentReports.set(interaction.user.id, {
           reasonValue: interaction.values[0],
           reporterTag: interaction.user.tag,
-          reportChannelId: interaction.channelId,
+          reporterId: interaction.user.id,
+          guildId: interaction.guildId,
           expiresAt: Date.now() + incidentReportWindowMs
         });
 
-        const modal = new ModalBuilder()
-          .setCustomId('incident_modal')
-          .setTitle('Race Incident Melding');
+        const userSelect = new UserSelectMenuBuilder()
+          .setCustomId('incident_culprit_select')
+          .setPlaceholder('Selecteer de schuldige rijder')
+          .setMaxValues(1);
 
-        const raceInput = new TextInputBuilder()
-          .setCustomId('race_naam')
-          .setLabel('Welke race?')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true);
+        const row = new ActionRowBuilder().addComponents(userSelect);
 
-        const roundInput = new TextInputBuilder()
-          .setCustomId('ronde')
-          .setLabel('Welke ronde?')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true);
-
-        const driverInput = new TextInputBuilder()
-          .setCustomId('schuldige_rijder')
-          .setLabel('Schuldige rijder (naam)')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true);
-
-        const descriptionInput = new TextInputBuilder()
-          .setCustomId('beschrijving')
-          .setLabel('Beschrijving van het incident')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true);
-
-        const evidenceInput = new TextInputBuilder()
-          .setCustomId('bewijs_links')
-          .setLabel('Links naar beelden (video/plaatjes)')
-          .setStyle(TextInputStyle.Paragraph)
-          .setPlaceholder('Streamable, YouTube, Imgur, etc.')
-          .setRequired(false);
-
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(raceInput),
-          new ActionRowBuilder().addComponents(roundInput),
-          new ActionRowBuilder().addComponents(driverInput),
-          new ActionRowBuilder().addComponents(descriptionInput),
-          new ActionRowBuilder().addComponents(evidenceInput)
-        );
-
-        await interaction.showModal(modal);
+        await interaction.reply({
+          content: 'Wie is de tegenpartij/schuldige?',
+          components: [row],
+          ephemeral: true
+        });
         return;
       }
 
-      // 4) Modal submit: post naar voteChannel
+      // 3a) User Select submit: schuldige bewaren en modal tonen
+      if (interaction.isUserSelectMenu() && interaction.customId === 'incident_culprit_select') {
+        const pending = pendingIncidentReports.get(interaction.user.id);
+        if (!pending) {
+          return interaction.reply({ content: '❌ Sessie verlopen. Begin opnieuw.', ephemeral: true });
+        }
+
+        const selectedUserId = interaction.values[0];
+        const selectedUser = interaction.users.get(selectedUserId);
+        pending.guiltyId = selectedUserId;
+        pending.guiltyTag = selectedUser ? selectedUser.tag : 'Onbekend';
+        
+        // Update pending state
+        pendingIncidentReports.set(interaction.user.id, pending);
+
+        await interaction.showModal(buildIncidentModal());
+        return;
+      }
+
+      // 3b) Dropdown stemmen voor indiener
+      if (interaction.isStringSelectMenu() && interaction.customId === 'vote_reporter_select') {
+        const incidentData = activeIncidents.get(interaction.message.id);
+        const isVoteMessage = !!incidentData;
+
+        if (!isVoteMessage) return;
+        if (interaction.channelId !== config.voteChannelId) {
+          return interaction.reply({ content: '❌ Stemmen kan alleen in het stem-kanaal.', ephemeral: true });
+        }
+        if (!isSteward(interaction.member)) {
+          return interaction.reply({ content: '❌ Alleen stewards kunnen stemmen!', ephemeral: true });
+        }
+
+        if (!incidentData.votes[interaction.user.id]) {
+          incidentData.votes[interaction.user.id] = {
+            category: null,
+            plus: false,
+            minus: false,
+            reporterCategory: null,
+            reporterPlus: false,
+            reporterMinus: false
+          };
+        }
+
+        const value = interaction.values[0];
+        const entry = incidentData.votes[interaction.user.id];
+
+        if (value === 'plus') {
+          entry.reporterPlus = !entry.reporterPlus;
+          if (entry.reporterPlus) entry.reporterMinus = false;
+        } else if (value === 'minus') {
+          entry.reporterMinus = !entry.reporterMinus;
+          if (entry.reporterMinus) entry.reporterPlus = false;
+        } else {
+          entry.reporterCategory = value;
+        }
+
+        const tally = buildTallyText(incidentData.votes, 'reporter');
+        const newEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+        const fields = newEmbed.data.fields ?? [];
+        const idx = fields.findIndex((f) => f.name === '📊 Tussenstand (Indiener)');
+        if (idx >= 0) fields[idx].value = `\`\`\`\n${tally}\n\`\`\``;
+        newEmbed.setFields(fields);
+
+        await interaction.message.edit({ embeds: [newEmbed] });
+
+        if (value === 'plus' || value === 'minus') {
+          return interaction.reply({
+            content: `✅ ${value === 'plus' ? '+ Strafpunt' : '- Strafpunt'} is nu **${value === 'plus' ? (entry.reporterPlus ? 'AAN' : 'UIT') : (entry.reporterMinus ? 'AAN' : 'UIT')}** (indiener)`,
+            ephemeral: true
+          });
+        }
+
+        return interaction.reply({ content: `✅ Stem geregistreerd: **${value.toUpperCase()}** (indiener)`, ephemeral: true });
+      }
+
+      // 4) Modal submit: review tonen
       if (interaction.isModalSubmit() && interaction.customId === 'incident_modal') {
         const pending = pendingIncidentReports.get(interaction.user.id);
         if (!pending) {
@@ -256,84 +486,35 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         const raceName = interaction.fields.getTextInputValue('race_naam');
         const round = interaction.fields.getTextInputValue('ronde');
-        const guiltyDriver = interaction.fields.getTextInputValue('schuldige_rijder');
         const description = interaction.fields.getTextInputValue('beschrijving');
-        const evidence = interaction.fields.getTextInputValue('bewijs_links') || 'Geen bewijs geüpload';
-
-        const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
-        if (!voteChannel) {
-          return interaction.reply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.', ephemeral: true });
-        }
+        pending.raceName = raceName;
+        pending.round = round;
+        pending.description = description;
+        if (!pending.incidentNumber) pending.incidentNumber = generateIncidentNumber();
+        pending.expiresAt = Date.now() + incidentReportWindowMs;
+        pendingIncidentReports.set(interaction.user.id, pending);
 
         const reasonValue = pending.reasonValue;
         const reasonLabel = incidentReasons.find((r) => r.value === reasonValue)?.label || reasonValue;
-        const incidentNumber = generateIncidentNumber();
+        const guiltyDriver = pending.guiltyTag || 'Onbekend';
+        const guiltyMention = pending.guiltyId ? `<@${pending.guiltyId}>` : guiltyDriver;
 
-        const incidentEmbed = new EmbedBuilder()
-          .setColor('#FF6B00')
-          .setTitle(`🚨 Incident ${incidentNumber} - ${raceName}`)
-          .addFields(
-            { name: '🔢 Incidentnummer', value: incidentNumber, inline: true },
-            { name: '👤 Ingediend door', value: `${pending.reporterTag}`, inline: true },
-            { name: '🏁 Race', value: raceName, inline: true },
-            { name: '🔢 Ronde', value: round, inline: true },
-            { name: '⚠️ Schuldige rijder', value: guiltyDriver, inline: true },
-            { name: '📌 Reden', value: reasonLabel },
-            { name: '📝 Beschrijving', value: description },
-            { name: '🎥 Bewijs', value: evidence },
-            { name: '📊 Tussenstand', value: 'Nog geen stemmen.' }
-          )
-          .setTimestamp();
-
-        const voteButtons = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('vote_cat0').setLabel('Cat 0').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('vote_cat1').setLabel('Cat 1').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('vote_cat2').setLabel('Cat 2').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('vote_cat3').setLabel('Cat 3').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('vote_cat4').setLabel('Cat 4').setStyle(ButtonStyle.Secondary)
-        );
-
-        const voteButtonsRow2 = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('vote_cat5').setLabel('Cat 5').setStyle(ButtonStyle.Secondary)
-        );
-
-        const extraButtons = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('vote_plus').setLabel('+ Strafpunt').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId('vote_minus').setLabel('- Strafpunt').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('finalize_votes').setLabel('✅ Afsluiten').setStyle(ButtonStyle.Danger)
-        );
-
-        const message = await voteChannel.send({
-          content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${raceName} (${round}) - Door ${pending.reporterTag}`,
-          embeds: [incidentEmbed],
-          components: [voteButtons, voteButtonsRow2, extraButtons]
-        });
-
-        activeIncidents.set(message.id, {
-          votes: {},
-          incidentNumber,
+        const reviewEmbed = buildIncidentReviewEmbed({
+          incidentNumber: pending.incidentNumber,
           raceName,
           round,
-          guiltyDriver,
-          reason: reasonLabel,
-          reporter: pending.reporterTag
+          description,
+          reasonLabel,
+          guiltyMention,
+          reporterTag: pending.reporterTag
         });
 
-        pendingEvidence.set(interaction.user.id, {
-          messageId: message.id,
-          channelId: pending.reportChannelId,
-          expiresAt: Date.now() + evidenceWindowMs,
-          type: 'incident'
-        });
+        const reviewButtons = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('incident_review_edit').setLabel('✏️ Bewerken').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('incident_review_confirm').setLabel('✅ Bevestigen').setStyle(ButtonStyle.Success)
+        );
 
-        pendingIncidentReports.delete(interaction.user.id);
-        await interaction.reply({
-          content:
-            '✅ Je incident is verzonden naar de stewards!\n' +
-            `Incidentnummer: **${incidentNumber}**\n` +
-            'Upload je bewijsmateriaal in dit kanaal binnen 5 minuten om het automatisch toe te voegen.',
-          ephemeral: true
-        });
+        await interaction.reply({ embeds: [reviewEmbed], components: [reviewButtons], ephemeral: true });
         return;
       }
 
@@ -401,6 +582,32 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (interaction.isButton()) {
         const id = interaction.customId;
 
+        if (id === 'incident_review_edit' || id === 'incident_review_confirm') {
+          const pending = pendingIncidentReports.get(interaction.user.id);
+          if (!pending) {
+            return interaction.reply({ content: '❌ Geen open incident gevonden. Meld opnieuw.', ephemeral: true });
+          }
+          if (Date.now() > pending.expiresAt) {
+            pendingIncidentReports.delete(interaction.user.id);
+            return interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', ephemeral: true });
+          }
+
+          if (id === 'incident_review_edit') {
+            await interaction.showModal(
+              buildIncidentModal({
+                raceName: pending.raceName,
+                round: pending.round,
+                description: pending.description
+              })
+            );
+            return;
+          }
+
+          await interaction.deferReply({ ephemeral: true });
+          await submitIncidentReport(interaction, pending);
+          return;
+        }
+
         if (id === evidenceButtonIds.more || id === evidenceButtonIds.done) {
           const pending = pendingEvidence.get(interaction.user.id);
           const pendingType = pending?.type || 'incident';
@@ -426,6 +633,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           }
 
           if (id === evidenceButtonIds.more) {
+            const incidentLabel = pending.incidentNumber ? ` voor **${pending.incidentNumber}**` : '';
             pending.expiresAt = Date.now() + evidenceWindowMs;
             pending.promptMessageId = null;
             pendingEvidence.set(interaction.user.id, pending);
@@ -435,12 +643,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             return interaction.reply({
               content:
                 pendingType === 'appeal'
-                  ? '✅ Je kunt extra beelden uploaden voor je wederwoord. Upload binnen 5 minuten.'
-                  : '✅ Je kunt extra beelden uploaden. Upload binnen 5 minuten.',
+                  ? `✅ Je kunt extra beelden uploaden${incidentLabel} voor je wederwoord. Upload binnen 5 minuten.`
+                  : `✅ Je kunt extra beelden uploaden${incidentLabel}. Upload binnen 5 minuten.`,
               ephemeral: true
             });
           }
 
+          const incidentLabel = pending.incidentNumber ? ` voor **${pending.incidentNumber}**` : '';
           pendingEvidence.delete(interaction.user.id);
           if (interaction.message.deletable) {
             await interaction.message.delete().catch(() => {});
@@ -448,8 +657,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({
             content:
               pendingType === 'appeal'
-                ? '✅ Wederwoord afgerond. Bedankt voor het bewijs.'
-                : '✅ Incident afgerond. Bedankt voor het bewijs.',
+                ? `✅ Wederwoord${incidentLabel} afgerond. Bedankt voor het bewijs.`
+                : `✅ Incident${incidentLabel} afgerond. Bedankt voor het bewijs.`,
             ephemeral: true
           });
         }
@@ -473,7 +682,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         // Zorg dat gebruiker entry heeft
         if (!incidentData.votes[interaction.user.id]) {
-          incidentData.votes[interaction.user.id] = { category: null, plus: false, minus: false };
+          incidentData.votes[interaction.user.id] = {
+            category: null,
+            plus: false,
+            minus: false,
+            reporterCategory: null,
+            reporterPlus: false,
+            reporterMinus: false
+          };
         }
 
         // Afsluiten
@@ -506,15 +722,31 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           incidentData.votes[interaction.user.id].category = cat;
 
           // Update tussenstand in embed
-          const tally = buildTallyText(incidentData);
+          const tally = buildTallyText(incidentData.votes);
           const newEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
           const fields = newEmbed.data.fields ?? [];
-          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand');
+          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand (Dader)');
           if (idx >= 0) fields[idx].value = `\`\`\`\n${tally}\n\`\`\``;
           newEmbed.setFields(fields);
 
           await interaction.message.edit({ embeds: [newEmbed] });
           return interaction.reply({ content: `✅ Stem geregistreerd: **${cat.toUpperCase()}**`, ephemeral: true });
+        }
+
+        // Categorie stemmen (indiener)
+        if (id.startsWith('vote_reporter_cat')) {
+          const cat = id.replace('vote_reporter_', '');
+          incidentData.votes[interaction.user.id].reporterCategory = cat;
+
+          const tally = buildTallyText(incidentData.votes, 'reporter');
+          const newEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+          const fields = newEmbed.data.fields ?? [];
+          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand (Indiener)');
+          if (idx >= 0) fields[idx].value = `\`\`\`\n${tally}\n\`\`\``;
+          newEmbed.setFields(fields);
+
+          await interaction.message.edit({ embeds: [newEmbed] });
+          return interaction.reply({ content: `✅ Stem geregistreerd: **${cat.toUpperCase()}** (indiener)`, ephemeral: true });
         }
 
         // + Strafpunt toggle (aan/uit)
@@ -525,10 +757,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           // Optioneel: voorkom dat plus & minus tegelijk aan staan
           if (entry.plus) entry.minus = false;
 
-          const tally = buildTallyText(incidentData);
+          const tally = buildTallyText(incidentData.votes);
           const newEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
           const fields = newEmbed.data.fields ?? [];
-          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand');
+          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand (Dader)');
           if (idx >= 0) fields[idx].value = `\`\`\`\n${tally}\n\`\`\``;
           newEmbed.setFields(fields);
 
@@ -547,16 +779,58 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           // Optioneel: voorkom dat plus & minus tegelijk aan staan
           if (entry.minus) entry.plus = false;
 
-          const tally = buildTallyText(incidentData);
+          const tally = buildTallyText(incidentData.votes);
           const newEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
           const fields = newEmbed.data.fields ?? [];
-          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand');
+          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand (Dader)');
           if (idx >= 0) fields[idx].value = `\`\`\`\n${tally}\n\`\`\``;
           newEmbed.setFields(fields);
 
           await interaction.message.edit({ embeds: [newEmbed] });
           return interaction.reply({
             content: `✅ - Strafpunt is nu **${entry.minus ? 'AAN' : 'UIT'}** (voor jouw stem)`,
+            ephemeral: true
+          });
+        }
+
+        // + Strafpunt toggle (indiener)
+        if (id === 'vote_reporter_plus') {
+          const entry = incidentData.votes[interaction.user.id];
+          entry.reporterPlus = !entry.reporterPlus;
+
+          if (entry.reporterPlus) entry.reporterMinus = false;
+
+          const tally = buildTallyText(incidentData.votes, 'reporter');
+          const newEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+          const fields = newEmbed.data.fields ?? [];
+          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand (Indiener)');
+          if (idx >= 0) fields[idx].value = `\`\`\`\n${tally}\n\`\`\``;
+          newEmbed.setFields(fields);
+
+          await interaction.message.edit({ embeds: [newEmbed] });
+          return interaction.reply({
+            content: `✅ + Strafpunt is nu **${entry.reporterPlus ? 'AAN' : 'UIT'}** (indiener)`,
+            ephemeral: true
+          });
+        }
+
+        // - Strafpunt toggle (indiener)
+        if (id === 'vote_reporter_minus') {
+          const entry = incidentData.votes[interaction.user.id];
+          entry.reporterMinus = !entry.reporterMinus;
+
+          if (entry.reporterMinus) entry.reporterPlus = false;
+
+          const tally = buildTallyText(incidentData.votes, 'reporter');
+          const newEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+          const fields = newEmbed.data.fields ?? [];
+          const idx = fields.findIndex((f) => f.name === '📊 Tussenstand (Indiener)');
+          if (idx >= 0) fields[idx].value = `\`\`\`\n${tally}\n\`\`\``;
+          newEmbed.setFields(fields);
+
+          await interaction.message.edit({ embeds: [newEmbed] });
+          return interaction.reply({
+            content: `✅ - Strafpunt is nu **${entry.reporterMinus ? 'AAN' : 'UIT'}** (indiener)`,
             ephemeral: true
           });
         }
@@ -595,10 +869,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({ content: '❌ Stem-bericht niet gevonden.', ephemeral: true });
         }
 
-        const tally = buildTallyText(incidentData);
-        const winner = mostVotedCategory(incidentData);
+        const tally = buildTallyText(incidentData.votes);
+        const winner = mostVotedCategory(incidentData.votes);
         const decision = winner ? winner.toUpperCase() : 'CAT0';
-        const penaltyPoints = computePenaltyPoints(incidentData);
+        const penaltyPoints = computePenaltyPoints(incidentData.votes);
+        const reporterTally = buildTallyText(incidentData.votes, 'reporter');
+        const reporterWinner = mostVotedCategory(incidentData.votes, 'reporter');
+        const reporterDecision = reporterWinner ? reporterWinner.toUpperCase() : 'CAT0';
+        const reporterPenaltyPoints = computePenaltyPoints(incidentData.votes, 'reporter');
         let finalText = interaction.fields.getTextInputValue('eindoordeel').trim();
         if (decision === 'CAT0') finalText = 'No futher action';
 
@@ -610,9 +888,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
             { name: '🏁 Race', value: incidentData.raceName, inline: true },
             { name: '⚠️ Rijder', value: incidentData.guiltyDriver, inline: true },
-            { name: '📊 Stemresultaat', value: `\`\`\`\n${tally}\n\`\`\`` },
-            { name: '⚖️ Eindoordeel', value: `**${decision}**`, inline: true },
-            { name: '🎯 Strafpunten', value: `**${penaltyPoints}**`, inline: true },
+            { name: '📊 Stemresultaat (Dader)', value: `\`\`\`\n${tally}\n\`\`\`` },
+            { name: '⚖️ Eindoordeel (Dader)', value: `**${decision}**`, inline: true },
+            { name: '🎯 Strafpunten (Dader)', value: `**${penaltyPoints}**`, inline: true },
+            { name: '📊 Stemresultaat (Indiener)', value: `\`\`\`\n${reporterTally}\n\`\`\`` },
+            { name: '⚖️ Eindoordeel (Indiener)', value: `**${reporterDecision}**`, inline: true },
+            { name: '🎯 Strafpunten (Indiener)', value: `**${reporterPenaltyPoints}**`, inline: true },
             { name: '📝 Toelichting', value: finalText }
           )
           .setTimestamp();
@@ -633,8 +914,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               { name: '👤 Ingediend door', value: incidentData.reporter || 'Onbekend', inline: true },
               { name: '⚠️ Rijder', value: incidentData.guiltyDriver, inline: true },
               { name: '📌 Reden', value: incidentData.reason || 'Onbekend' },
-              { name: '⚖️ Eindoordeel', value: `**${decision}**`, inline: true },
-              { name: '🎯 Strafpunten', value: `**${penaltyPoints}**`, inline: true },
+              { name: '⚖️ Eindoordeel (Dader)', value: `**${decision}**`, inline: true },
+              { name: '🎯 Strafpunten (Dader)', value: `**${penaltyPoints}**`, inline: true },
+              { name: '⚖️ Eindoordeel (Indiener)', value: `**${reporterDecision}**`, inline: true },
+              { name: '🎯 Strafpunten (Indiener)', value: `**${reporterPenaltyPoints}**`, inline: true },
               { name: '📝 Toelichting', value: finalText },
               {
                 name: '🗣️ Wederwoord',

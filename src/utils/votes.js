@@ -1,17 +1,24 @@
-function computePenaltyPoints(incidentData) {
+function readVoteValue(entry, prefix, key) {
+  if (!prefix) return entry[key];
+  const prop = `${prefix}${key[0].toUpperCase()}${key.slice(1)}`;
+  return entry[prop];
+}
+
+function computePenaltyPoints(votes, prefix = '') {
   let penaltyPoints = 0;
-  for (const v of Object.values(incidentData.votes)) {
-    if (v.plus) penaltyPoints += 1;
-    if (v.minus) penaltyPoints -= 1;
+  for (const v of Object.values(votes)) {
+    if (readVoteValue(v, prefix, 'plus')) penaltyPoints += 1;
+    if (readVoteValue(v, prefix, 'minus')) penaltyPoints -= 1;
   }
   return penaltyPoints;
 }
 
-function buildTallyText(incidentData) {
+function buildTallyText(votes, prefix = '') {
   const catCount = { cat0: 0, cat1: 0, cat2: 0, cat3: 0, cat4: 0, cat5: 0 };
-  const penaltyPoints = computePenaltyPoints(incidentData);
-  for (const v of Object.values(incidentData.votes)) {
-    if (v.category && catCount[v.category] !== undefined) catCount[v.category]++;
+  const penaltyPoints = computePenaltyPoints(votes, prefix);
+  for (const v of Object.values(votes)) {
+    const category = readVoteValue(v, prefix, 'category');
+    if (category && catCount[category] !== undefined) catCount[category]++;
   }
 
   const lines = [
@@ -28,16 +35,17 @@ function buildTallyText(incidentData) {
   return lines.join('\n');
 }
 
-function mostVotedCategory(incidentData) {
+function mostVotedCategory(votes, prefix = '') {
   const counts = { cat0: 0, cat1: 0, cat2: 0, cat3: 0, cat4: 0, cat5: 0 };
 
-  for (const v of Object.values(incidentData.votes)) {
-    if (v.category && counts[v.category] !== undefined) counts[v.category]++;
+  for (const v of Object.values(votes)) {
+    const category = readVoteValue(v, prefix, 'category');
+    if (category && counts[category] !== undefined) counts[category]++;
   }
 
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  const [winner, votes] = sorted[0];
-  if (!votes || votes === 0) return null;
+  const [winner, voteCount] = sorted[0];
+  if (!voteCount || voteCount === 0) return null;
   return winner;
 }
 
