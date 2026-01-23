@@ -8,7 +8,8 @@ const {
   TextInputStyle,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
-  UserSelectMenuBuilder
+  UserSelectMenuBuilder,
+  ApplicationCommandOptionType
 } = require('discord.js');
 const {
   incidentReasons,
@@ -33,14 +34,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     const raceInput = new TextInputBuilder()
       .setCustomId('race_naam')
-      .setLabel('Welke race?')
+      .setLabel('Welke race? (alleen cijfers)')
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
     if (raceName != null) raceInput.setValue(raceName);
 
     const roundInput = new TextInputBuilder()
       .setCustomId('ronde')
-      .setLabel('Welke ronde?')
+      .setLabel('Welke ronde? (alleen cijfers)')
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
     if (round != null) roundInput.setValue(round);
@@ -73,7 +74,6 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     new EmbedBuilder()
       .setColor('#FFA000')
       .setTitle(`✅ Controleer je incidentmelding - ${incidentNumber || 'Onbekend'}`)
-      .setDescription('Controleer je gegevens. Kies **Bewerken** om aan te passen of **Bevestigen** om te verzenden.')
       .addFields(
         { name: '🔢 Incidentnummer', value: incidentNumber || 'Onbekend', inline: true },
         { name: '👤 Ingediend door', value: reporterTag || 'Onbekend', inline: true },
@@ -81,7 +81,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         { name: '📌 Reden', value: reasonLabel || 'Onbekend', inline: false },
         { name: '🏁 Race', value: raceName || 'Onbekend', inline: true },
         { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
-        { name: '📝 Beschrijving', value: description || 'Onbekend', inline: false }
+        { name: '📝 Beschrijving', value: description || 'Onbekend', inline: false },
+        {
+          name: 'ℹ️ Let op',
+          value:
+            'Kies **Bewerken** om aan te passen of **Bevestigen** om te verzenden.\n' +
+            'Je kunt het bewijs hierna delen of uploaden.'
+        }
       );
 
   const submitIncidentReport = async (interaction, pending) => {
@@ -193,7 +199,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       round,
       guiltyDriver,
       reason: reasonLabel,
-      reporter: pending.reporterTag
+      reporter: pending.reporterTag,
+      reporterId: pending.reporterId
     });
 
     let evidenceChannelId = interaction.channelId;
@@ -234,9 +241,28 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   client.on('ready', async () => {
     const commands = [
       {
-        name: 'incident-knop',
+        name: 'raceincident',
         description: 'Plaats een knop voor incident meldingen (in het meld-kanaal)',
         default_member_permissions: PermissionFlagsBits.Administrator.toString()
+      },
+      {
+        name: 'raceindent',
+        description: 'Incident acties voor rijders',
+        options: [
+          {
+            type: ApplicationCommandOptionType.Subcommand,
+            name: 'neemterug',
+            description: 'Neem je incidentmelding terug',
+            options: [
+              {
+                type: ApplicationCommandOptionType.String,
+                name: 'ticketnummer',
+                description: 'Incidentnummer (bijv. INC-1234)',
+                required: true
+              }
+            ]
+          }
+        ]
       }
     ];
 
@@ -246,7 +272,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   client.on('interactionCreate', async (interaction) => {
     try {
       // 1) Slash command: knop plaatsen
-      if (interaction.isChatInputCommand() && interaction.commandName === 'incident-knop') {
+      if (interaction.isChatInputCommand() && interaction.commandName === 'raceincident') {
         const reportButton = new ButtonBuilder()
           .setCustomId('report_incident')
           .setLabel('🚨 Meld Incident')
@@ -286,6 +312,116 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         await interaction.reply({ embeds: [embed], components: [row] });
         return;
+      }
+
+      // 1b) Slash command: incident terugnemen (rijders)
+      if (
+        interaction.isChatInputCommand() &&
+        interaction.commandName === 'raceindent'
+      ) {
+        const subcommand = interaction.options.getSubcommand();
+        if (subcommand !== 'neemterug') {
+          return interaction.reply({ content: '❌ Onbekende subcommand.', ephemeral: true });
+        }
+
+        const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
+        const normalizedTicket = ticketNumber.toUpperCase();
+        let matchEntry = null;
+        for (const entry of activeIncidents.entries()) {
+          const incidentNumber = entry[1]?.incidentNumber || '';
+          if (incidentNumber.toUpperCase() === normalizedTicket) {
+            matchEntry = entry;
+            break;
+          }
+        }
+
+        if (!matchEntry) {
+          return interaction.reply({
+            content: '❌ Incident niet gevonden of al afgehandeld.',
+            ephemeral: true
+          });
+        }
+
+        const [messageId, incidentData] = matchEntry;
+        const reporterId = incidentData.reporterId;
+        const reporterTag = incidentData.reporter;
+        const isReporter =
+          (reporterId && reporterId === interaction.user.id) ||
+          (!reporterId && reporterTag && reporterTag === interaction.user.tag);
+
+        if (!isReporter) {
+          return interaction.reply({
+            content: '❌ Alleen de melder van dit incident kan het terugnemen.',
+            ephemeral: true
+          });
+        }
+
+        for (const [userId, pending] of pendingEvidence.entries()) {
+          if ((pending.incidentNumber || '').toUpperCase() === normalizedTicket) {
+            pendingEvidence.delete(userId);
+          }
+        }
+
+        const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+        if (!voteChannel) {
+          return interaction.reply({
+            content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.',
+            ephemeral: true
+          });
+        }
+
+        const voteMessage = await voteChannel.messages.fetch(messageId).catch(() => null);
+        let deleted = false;
+        if (voteMessage?.deletable) {
+          await voteMessage.delete().catch(() => {});
+          deleted = true;
+        }
+
+        if (!deleted && voteMessage) {
+          const baseEmbed = voteMessage.embeds[0]
+            ? EmbedBuilder.from(voteMessage.embeds[0])
+            : new EmbedBuilder().setTitle(`🚨 Incident ${incidentData.incidentNumber || 'Onbekend'}`);
+          const fields = baseEmbed.data.fields ?? [];
+          const statusIndex = fields.findIndex((f) => f.name === '🛑 Status');
+          const statusField = { name: '🛑 Status', value: `Teruggenomen door ${interaction.user.tag}` };
+          if (statusIndex >= 0) {
+            fields[statusIndex] = statusField;
+          } else {
+            fields.push(statusField);
+          }
+          baseEmbed.setColor('#777777').setFields(fields);
+          await voteMessage.edit({ embeds: [baseEmbed], components: [] }).catch(() => {});
+        }
+
+        const resolvedChannel = await client.channels.fetch(config.resolvedChannelId).catch(() => null);
+        if (resolvedChannel) {
+          const reporterMention = incidentData.reporterId ? `<@${incidentData.reporterId}>` : incidentData.reporter;
+          const noticeEmbed = new EmbedBuilder()
+            .setColor('#777777')
+            .setTitle(`🛑 Incident Teruggenomen - ${incidentData.incidentNumber || 'Onbekend'}`)
+            .setDescription(`Incident is door de melder teruggenomen (${reporterMention || 'Onbekend'}).`)
+            .addFields(
+              { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
+              { name: '🏁 Race', value: incidentData.raceName || 'Onbekend', inline: true },
+              { name: '🔢 Ronde', value: incidentData.round || 'Onbekend', inline: true },
+              { name: '👤 Ingediend door', value: reporterMention || 'Onbekend', inline: true },
+              { name: '⚠️ Rijder', value: incidentData.guiltyDriver || 'Onbekend', inline: true },
+              { name: '📌 Reden', value: incidentData.reason || 'Onbekend' }
+            )
+            .setTimestamp();
+          await resolvedChannel.send({
+            content: reporterMention ? `🛑 Incident teruggenomen door ${reporterMention}.` : '🛑 Incident teruggenomen.',
+            embeds: [noticeEmbed]
+          }).catch(() => {});
+        }
+
+        activeIncidents.delete(messageId);
+        return interaction.reply({
+          content: deleted
+            ? `✅ Incident **${ticketNumber}** is verwijderd.`
+            : `✅ Incident **${ticketNumber}** is teruggenomen en afgesloten.`,
+          ephemeral: true
+        });
       }
 
       // 2) Meld-knop: start in DM
@@ -484,8 +620,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', ephemeral: true });
         }
 
-        const raceName = interaction.fields.getTextInputValue('race_naam');
-        const round = interaction.fields.getTextInputValue('ronde');
+        const raceName = interaction.fields.getTextInputValue('race_naam').trim();
+        const round = interaction.fields.getTextInputValue('ronde').trim();
+        if (!/^\d+$/.test(raceName) || !/^\d+$/.test(round)) {
+          return interaction.reply({
+            content: '❌ Vul bij **Welke race?** en **Welke ronde?** alleen cijfers in.',
+            ephemeral: true
+          });
+        }
         const description = interaction.fields.getTextInputValue('beschrijving');
         pending.raceName = raceName;
         pending.round = round;
