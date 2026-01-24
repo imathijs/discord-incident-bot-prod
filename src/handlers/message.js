@@ -159,16 +159,23 @@ function registerMessageHandlers(client, { config, state }) {
     scheduleMessageDeletion(client, autoDeleteMs, message.id, message.channelId);
     scheduleMessageDeletion(client, autoDeleteMs, confirmation.id, confirmation.channelId);
     scheduleMessageDeletion(client, autoDeleteMs, prompt.id, prompt.channelId);
+    const botMessageIds = [
+      ...(pending.botMessageIds || []),
+      confirmation?.id,
+      prompt?.id
+    ].filter(Boolean);
     if (prompt?.id) {
       pendingEvidence.set(message.author.id, {
         ...pending,
         expiresAt: Date.now() + evidenceWindowMs,
-        promptMessageId: prompt.id
+        promptMessageId: prompt.id,
+        botMessageIds
       });
     } else {
       pendingEvidence.set(message.author.id, {
         ...pending,
-        expiresAt: Date.now() + evidenceWindowMs
+        expiresAt: Date.now() + evidenceWindowMs,
+        botMessageIds
       });
     }
   });
