@@ -49,6 +49,7 @@ De meeste instellingen staan in `config.json`:
 ## Cheatsheets
 - Variabelen: `VARIABELEN_CHEATSHEET.md`
 - Git: `GIT_CHEATSHEET.md`
+- Uitleg bot: `UITLEG_BOT.md`
 
 ## Install / Run (kort)
 1) Installeer dependencies:
