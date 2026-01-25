@@ -46,4 +46,4 @@ flowchart LR
 ```
 
 ## Infographic (SVG)
-Bestand: `infographic.svg`
+![Infographic](infographic.svg)
