@@ -7,17 +7,19 @@ De bot verzorgt:
 - een duidelijke meldflow voor incidenten;
 - een bewijs‑flow via DM;
 - een stemproces voor stewards;
-- publicatie van uitslagen in het resolved kanaal;
+- publicatie van uitslagen in het resolved kanaal (incl. divisie);
 - een gecontroleerd wederwoord‑moment voor de schuldige.
 
 ## Incident melder – stappen
 1) Ga naar het meld‑kanaal en klik op **Meld Incident**.
-2) Kies de reden van het incident.
-3) Selecteer de schuldige rijder.
-4) Vul race‑nummer, ronde en beschrijving in.
-5) Controleer je melding en bevestig.
-6) Het incident verschijnt in het stewards kanaal met stemknoppen.
-7) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs wordt toegevoegd aan het incident.
+2) Geef aan in welke divisie je rijdt: **Div 1**, **Div 2**, **Div 3**, **Div 4**.
+3) Kies de reden van het incident.
+4) Selecteer de schuldige rijder.
+5) Vul race‑nummer, ronde en beschrijving in.
+6) Controleer je melding en bevestig.
+7) Het incident verschijnt in het stewards kanaal met stemknoppen. De divisie wordt meegegeven.
+8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs wordt toegevoegd aan het incident.
+9) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
 
 ## Incident schuldige – jouw visie geven
 Wanneer een incident is afgehandeld:
@@ -35,14 +37,15 @@ Belangrijk:
 ```mermaid
 flowchart LR
   A[Incident melder] --> B[Meld incident via knop]
-  B --> C[Kies reden + schuldige]
-  C --> D[Vul race/ronde/beschrijving]
-  D --> E[Bevestig + upload bewijs (DM)]
-  E --> F[Stewards kanaal]
-  F --> G[Stemmen + eindoordeel]
-  G --> H[Resolved kanaal]
-  H --> I[Schuldige: Wederwoord indienen]
-  I --> J[Reactie naar stewards]
+  B --> C[Kies divisie (Div 1-4)]
+  C --> D[Kies reden + schuldige]
+  D --> E[Vul race/ronde/beschrijving]
+  E --> F[Bevestig + upload bewijs (DM)]
+  F --> G[Stewards kanaal + divisie]
+  G --> H[Stemmen + eindoordeel + divisie]
+  H --> I[Resolved kanaal + divisie]
+  I --> J[Schuldige: Wederwoord indienen]
+  J --> K[Reactie naar stewards]
 ```
 
 ## Infographic (SVG)

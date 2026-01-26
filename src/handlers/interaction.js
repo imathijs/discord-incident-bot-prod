@@ -113,8 +113,28 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return modal;
   };
 
+  const buildReasonRows = () => {
+    const rows = [];
+    const reasonsPerRow = 5;
+    for (let i = 0; i < incidentReasons.length; i += reasonsPerRow) {
+      const row = new ActionRowBuilder();
+      const slice = incidentReasons.slice(i, i + reasonsPerRow);
+      for (const reason of slice) {
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`incident_reason:${reason.value}`)
+            .setLabel(reason.label)
+            .setStyle(ButtonStyle.Secondary)
+        );
+      }
+      rows.push(row);
+    }
+    return rows;
+  };
+
   const buildIncidentReviewEmbed = ({
     incidentNumber,
+    division,
     raceName,
     round,
     description,
@@ -130,6 +150,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         { name: '👤 Ingediend door', value: reporterTag || 'Onbekend', inline: true },
         { name: '⚠️ Schuldige rijder', value: guiltyMention || 'Onbekend', inline: true },
         { name: '📌 Reden', value: reasonLabel || 'Onbekend', inline: false },
+        { name: '🏁 Divisie', value: division || 'Onbekend', inline: true },
         { name: '🏁 Race', value: raceName || 'Onbekend', inline: true },
         { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
         { name: '📝 Beschrijving', value: description || 'Onbekend', inline: false },
@@ -169,6 +190,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const round = pending.round;
     const description = pending.description;
     const evidence = 'Zie uploads/links';
+    const division = pending.division || 'Onbekend';
 
     if (!raceName || !round || !description) {
       return interaction.editReply({
@@ -201,6 +223,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       .addFields(
         { name: '🔢 Incidentnummer', value: incidentNumber, inline: true },
         { name: '👤 Ingediend door', value: `${pending.reporterTag}`, inline: true },
+        { name: '🏁 Divisie', value: division, inline: true },
         { name: '🏁 Race', value: raceName, inline: true },
         { name: '🔢 Ronde', value: round, inline: true },
         { name: '⚠️ Schuldige rijder', value: guiltyMention || guiltyDriver, inline: true },
@@ -253,7 +276,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     );
 
     const message = await voteChannel.send({
-      content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${raceName} (${round}) - Door ${pending.reporterTag}`,
+      content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${division} - ${raceName} (${round}) - Door ${pending.reporterTag}`,
       embeds: [incidentEmbed],
       components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
     });
@@ -261,6 +284,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     activeIncidents.set(message.id, {
       votes: {},
       incidentNumber,
+      division,
       raceName,
       round,
       guiltyId: pending.guiltyId,
@@ -396,34 +420,34 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             });
           }
 
-        const reportButton = new ButtonBuilder()
-          .setCustomId('report_incident')
-          .setLabel('🚨 Meld Incident')
-          .setStyle(ButtonStyle.Danger);
+          const reportButton = new ButtonBuilder()
+            .setCustomId('report_incident')
+            .setLabel('🚨 Meld Incident')
+            .setStyle(ButtonStyle.Danger);
 
-        const row = new ActionRowBuilder().addComponents(reportButton);
+          const row = new ActionRowBuilder().addComponents(reportButton);
 
-        const embed = new EmbedBuilder()
-          .setColor('#FF0000')
-          .setTitle('DRE - Race Incident Meldingssysteem')
-          .setDescription(
-            [
-              'Wil je een incident melden bij de stewards van DRE?',
-              'Klik dan op de knop **Meld Incident**.',
-              '',
-              'Je doorloopt de stappen in dit kanaal.',
-              'Na het indienen ontvang je een DM om bewijsmateriaal te delen via een',
-              'YouTube-link of door het zelf te uploaden.',
-              '',
-              'De tegenpartij zal een DM ontvangen om zijn visie op het incident toe te lichten.',
-              '',
-              '⚠️ **Belangrijk**',
-              'Zonder bewijsmateriaal kunnen wij een incident niet beoordelen.',
-              'Zorg er daarom voor dat je bewijs beschikbaar hebt, zoals:',
-              '- een opname van het incident geplaatst op YouTube.',
-              '- losse opname van het incident. Je upload het bestand via discord.'
-            ].join('\n')
-          );
+          const embed = new EmbedBuilder()
+            .setColor('#FF0000')
+            .setTitle('DRE - Race Incident Meldingssysteem')
+            .setDescription(
+              [
+                'Wil je een incident melden bij de stewards van DRE?',
+                'Klik dan op de knop **Meld Incident**.',
+                '',
+                'Je doorloopt de stappen in dit kanaal.',
+                'Na het indienen ontvang je een DM om bewijsmateriaal te delen via een',
+                'YouTube-link of door het zelf te uploaden.',
+                '',
+                'De tegenpartij zal een DM ontvangen om zijn visie op het incident toe te lichten.',
+                '',
+                '⚠️ **Belangrijk**',
+                'Zonder bewijsmateriaal kunnen wij een incident niet beoordelen.',
+                'Zorg er daarom voor dat je bewijs beschikbaar hebt, zoals:',
+                '- een opname van het incident geplaatst op YouTube.',
+                '- losse opname van het incident. Je upload het bestand via discord.'
+              ].join('\n')
+            );
 
           await interaction.reply({ embeds: [embed], components: [row] });
           return;
@@ -573,6 +597,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             .setDescription(`Incident is door de melder teruggenomen (${reporterMention || 'Onbekend'}).`)
             .addFields(
               { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
+              { name: '🏁 Divisie', value: incidentData.division || 'Onbekend', inline: true },
               { name: '🏁 Race', value: incidentData.raceName || 'Onbekend', inline: true },
               { name: '🔢 Ronde', value: incidentData.round || 'Onbekend', inline: true },
               { name: '👤 Ingediend door', value: reporterMention || 'Onbekend', inline: true },
@@ -604,26 +629,50 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           });
         }
 
-        const reasonRows = [];
-        const reasonsPerRow = 5;
-        for (let i = 0; i < incidentReasons.length; i += reasonsPerRow) {
-          const row = new ActionRowBuilder();
-          const slice = incidentReasons.slice(i, i + reasonsPerRow);
-          for (const reason of slice) {
-            row.addComponents(
-              new ButtonBuilder()
-                .setCustomId(`incident_reason:${reason.value}`)
-                .setLabel(reason.label)
-                .setStyle(ButtonStyle.Secondary)
-            );
-          }
-          reasonRows.push(row);
-        }
+        const divisionRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('incident_division:div1').setLabel('Div 1').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('incident_division:div2').setLabel('Div 2').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('incident_division:div3').setLabel('Div 3').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('incident_division:div4').setLabel('Div 4').setStyle(ButtonStyle.Primary)
+        );
 
         await interaction.reply({
-          content: 'Kies de reden van het incident. Daarna kun je de schuldige selecteren.',
-          components: reasonRows,
+          content: 'In welke divisie rij je?',
+          components: [divisionRow],
           ephemeral: true
+        });
+        return;
+      }
+
+      // 2b) Divisie selecteren: daarna reden knoppen tonen
+      if (interaction.isButton() && interaction.customId.startsWith('incident_division:')) {
+        if (!interaction.guildId) {
+          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', ephemeral: true });
+        }
+
+        const divisionValue = interaction.customId.split(':')[1] || '';
+        const divisionMap = {
+          div1: 'Div 1',
+          div2: 'Div 2',
+          div3: 'Div 3',
+          div4: 'Div 4'
+        };
+        const division = divisionMap[divisionValue] || 'Onbekend';
+
+        const existing = pendingIncidentReports.get(interaction.user.id);
+        pendingIncidentReports.set(interaction.user.id, {
+          ...(existing || {}),
+          division,
+          reporterTag: interaction.user.tag,
+          reporterId: interaction.user.id,
+          guildId: interaction.guildId,
+          expiresAt: Date.now() + incidentReportWindowMs
+        });
+
+        const reasonRows = buildReasonRows();
+        await interaction.update({
+          content: 'Kies de reden van het incident. Daarna kun je de schuldige selecteren.',
+          components: reasonRows
         });
         return;
       }
@@ -661,7 +710,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         const reasonValue = interaction.customId.split(':')[1] || '';
+        const existing = pendingIncidentReports.get(interaction.user.id);
         pendingIncidentReports.set(interaction.user.id, {
+          ...(existing || {}),
           reasonValue,
           reporterTag: interaction.user.tag,
           reporterId: interaction.user.id,
@@ -689,7 +740,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', ephemeral: true });
         }
 
+        const existing = pendingIncidentReports.get(interaction.user.id);
         pendingIncidentReports.set(interaction.user.id, {
+          ...(existing || {}),
           reasonValue: interaction.values[0],
           reporterTag: interaction.user.tag,
           reporterId: interaction.user.id,
@@ -765,6 +818,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         const reviewEmbed = buildIncidentReviewEmbed({
           incidentNumber: pending.incidentNumber,
+          division: pending.division,
           raceName,
           round,
           description,
@@ -1211,6 +1265,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           )
           .addFields(
             { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
+            { name: '🏁 Divisie', value: incidentData.division || 'Onbekend', inline: true },
             { name: '🏁 Race', value: incidentData.raceName, inline: true },
             { name: '⚠️ Rijder', value: incidentData.guiltyDriver, inline: true },
             { name: '📊 Stemresultaat (Dader)', value: `\`\`\`\n${tally}\n\`\`\`` },
@@ -1244,6 +1299,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
                 name: '🧾 Samenvatting',
                 value:
                   `Incidentnummer: **${incidentData.incidentNumber || 'Onbekend'}**\n` +
+                  `Divisie: **${incidentData.division || 'Onbekend'}**\n` +
                   `Race: **${incidentData.raceName}**  •  Ronde: **${incidentData.round}**\n` +
                   `Ingediend door: **${incidentData.reporter || 'Onbekend'}**\n` +
                   `Rijder: **${incidentData.guiltyDriver}**\n` +
