@@ -58,6 +58,7 @@ De meeste instellingen staan in `config.json`:
 - Git: `GIT_CHEATSHEET.md`
 - Uitleg bot: `UITLEG_BOT.md`
 - Google Sheets: `GOOGLE_SHEETS_CHEATSHEET.md`
+- Discord integratie: `DISCORD_CHEATSHEET.md`
 
 ## Install / Run (kort)
 1) Installeer dependencies:

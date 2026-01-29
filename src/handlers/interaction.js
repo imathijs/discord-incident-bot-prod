@@ -22,6 +22,8 @@ const {
 const { buildTallyText, computePenaltyPoints, mostVotedCategory } = require('../utils/votes');
 const { buildEvidencePromptRow } = require('../utils/evidence');
 const { appendIncidentRow, updateIncidentStatus, updateIncidentResolution } = require('../utils/sheets');
+const { fetchTextTargetChannel } = require('../utils/channels');
+const { editMessageWithRetry } = require('../utils/messages');
 
 function registerInteractionHandlers(client, { config, state, generateIncidentNumber }) {
   const {
@@ -220,7 +222,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       });
     }
 
-    const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+    const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
     if (!voteChannel) {
       return interaction.editReply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
     }
@@ -599,7 +601,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
         removePendingGuiltyReply(incidentData.incidentNumber || ticketNumber);
 
-        const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
           return interaction.reply({
             content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.',
@@ -627,7 +629,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             fields.push(statusField);
           }
           baseEmbed.setColor('#777777').setFields(fields);
-          await voteMessage.edit({ embeds: [baseEmbed], components: [] }).catch(() => {});
+          try {
+            await editMessageWithRetry(
+              voteMessage,
+              { embeds: [baseEmbed], components: [] },
+              'Withdraw incident embed update',
+              { userId: interaction.user?.id }
+            );
+          } catch {}
         }
 
         const resolvedChannel = await client.channels.fetch(config.resolvedChannelId).catch(() => null);
@@ -901,7 +910,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         const story = interaction.fields.getTextInputValue('verhaal');
         const evidenceLinks = interaction.fields.getTextInputValue('bewijs_links') || 'Geen bewijs geüpload';
 
-        const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
           return interaction.reply({ content: '❌ Steward-kanaal niet gevonden! Check voteChannelId.', ephemeral: true });
         }
@@ -1113,6 +1122,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return;
         }
 
+        await interaction.deferReply({ ephemeral: true });
+
         const guiltyLabel = incidentData.guiltyDriver || 'Onbekend';
         const reporterLabel = incidentData.reporter || 'Onbekend';
         const guiltyFieldName = `📊 Tussenstand - ${guiltyLabel}`;
@@ -1138,8 +1149,17 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (listIdx >= 0) fields[listIdx].value = voteList;
           newEmbed.setFields(fields);
 
-          await interaction.message.edit({ embeds: [newEmbed] });
-          return interaction.reply({
+          try {
+            await editMessageWithRetry(
+              interaction.message,
+              { embeds: [newEmbed] },
+              'Vote embed update',
+              { userId: interaction.user?.id }
+            );
+          } catch {
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+          }
+          return interaction.editReply({
             content: isSame
               ? '✅ Stem voor de schuldige ingetrokken.'
               : `✅ Stem geregistreerd: **${cat.toUpperCase()}**`,
@@ -1164,8 +1184,17 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (listIdx >= 0) fields[listIdx].value = voteList;
           newEmbed.setFields(fields);
 
-          await interaction.message.edit({ embeds: [newEmbed] });
-          return interaction.reply({
+          try {
+            await editMessageWithRetry(
+              interaction.message,
+              { embeds: [newEmbed] },
+              'Reporter vote embed update',
+              { userId: interaction.user?.id }
+            );
+          } catch {
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+          }
+          return interaction.editReply({
             content: isSame
               ? '✅ Stem voor de indiener ingetrokken.'
               : `✅ Stem geregistreerd: **${cat.toUpperCase()}** (indiener)`,
@@ -1189,8 +1218,17 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (listIdx >= 0) fields[listIdx].value = voteList;
           newEmbed.setFields(fields);
 
-          await interaction.message.edit({ embeds: [newEmbed] });
-          return interaction.reply({
+          try {
+            await editMessageWithRetry(
+              interaction.message,
+              { embeds: [newEmbed] },
+              'Vote plus embed update',
+              { userId: interaction.user?.id }
+            );
+          } catch {
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+          }
+          return interaction.editReply({
             content: `✅ + Strafpunt is nu **${entry.plus ? 'AAN' : 'UIT'}** (voor jouw stem)`,
             ephemeral: true
           });
@@ -1212,8 +1250,17 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (listIdx >= 0) fields[listIdx].value = voteList;
           newEmbed.setFields(fields);
 
-          await interaction.message.edit({ embeds: [newEmbed] });
-          return interaction.reply({
+          try {
+            await editMessageWithRetry(
+              interaction.message,
+              { embeds: [newEmbed] },
+              'Vote minus embed update',
+              { userId: interaction.user?.id }
+            );
+          } catch {
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+          }
+          return interaction.editReply({
             content: `✅ - Strafpunt is nu **${entry.minus ? 'AAN' : 'UIT'}** (voor jouw stem)`,
             ephemeral: true
           });
@@ -1235,8 +1282,17 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (listIdx >= 0) fields[listIdx].value = voteList;
           newEmbed.setFields(fields);
 
-          await interaction.message.edit({ embeds: [newEmbed] });
-          return interaction.reply({
+          try {
+            await editMessageWithRetry(
+              interaction.message,
+              { embeds: [newEmbed] },
+              'Reporter vote plus embed update',
+              { userId: interaction.user?.id }
+            );
+          } catch {
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+          }
+          return interaction.editReply({
             content: `✅ + Strafpunt is nu **${entry.reporterPlus ? 'AAN' : 'UIT'}** (indiener)`,
             ephemeral: true
           });
@@ -1258,8 +1314,17 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (listIdx >= 0) fields[listIdx].value = voteList;
           newEmbed.setFields(fields);
 
-          await interaction.message.edit({ embeds: [newEmbed] });
-          return interaction.reply({
+          try {
+            await editMessageWithRetry(
+              interaction.message,
+              { embeds: [newEmbed] },
+              'Reporter vote minus embed update',
+              { userId: interaction.user?.id }
+            );
+          } catch {
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+          }
+          return interaction.editReply({
             content: `✅ - Strafpunt is nu **${entry.reporterMinus ? 'AAN' : 'UIT'}** (indiener)`,
             ephemeral: true
           });
@@ -1288,7 +1353,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', ephemeral: true });
         }
 
-        const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
           return interaction.reply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.', ephemeral: true });
         }
@@ -1331,7 +1396,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           )
           .setTimestamp();
 
-        await voteMessage.edit({ components: [] });
+        try {
+          await editMessageWithRetry(
+            voteMessage,
+            { components: [] },
+            'Finalize remove components',
+            { userId: interaction.user?.id }
+          );
+        } catch {}
         await voteMessage.reply({ embeds: [resultEmbed] });
 
         const resolvedChannel = await client.channels.fetch(config.resolvedChannelId).catch(() => null);

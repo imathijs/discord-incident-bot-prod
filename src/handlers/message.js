@@ -1,6 +1,8 @@
 const { EmbedBuilder } = require('discord.js');
 const { evidenceWindowMs } = require('../constants');
 const { buildEvidencePromptRow, downloadAttachment, scheduleMessageDeletion } = require('../utils/evidence');
+const { fetchTextTargetChannel } = require('../utils/channels');
+const { editMessageWithRetry } = require('../utils/messages');
 
 const extractUrls = (content = '') => {
   const matches = content.match(/https?:\/\/\S+/gi) || [];
@@ -81,7 +83,7 @@ function registerMessageHandlers(client, { config, state }) {
           return;
         }
 
-        const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
           await message.reply('❌ Steward-kanaal niet gevonden. Probeer later opnieuw.');
           return;
@@ -198,7 +200,7 @@ function registerMessageHandlers(client, { config, state }) {
       return;
     }
 
-    const voteChannel = await client.channels.fetch(config.voteChannelId).catch(() => null);
+    const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
     if (!voteChannel) return;
 
     const voteMessage = await voteChannel.messages.fetch(pending.messageId).catch(() => null);
@@ -220,7 +222,14 @@ function registerMessageHandlers(client, { config, state }) {
     }
     embed.setFields(fields);
 
-    await voteMessage.edit({ embeds: [embed] });
+    try {
+      await editMessageWithRetry(
+        voteMessage,
+        { embeds: [embed] },
+        'Evidence embed update',
+        { userId: message.author?.id }
+      );
+    } catch {}
     try {
       const attachments = [...message.attachments.values()];
       const files = [];
