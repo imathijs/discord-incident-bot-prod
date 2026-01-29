@@ -1,4 +1,4 @@
-# DRE Race Incident Bot
+# DRE Race Incident Bot *Production*
 
 Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, stemmen door stewards, bewijs uploaden, wederwoord en afhandeling.
 
