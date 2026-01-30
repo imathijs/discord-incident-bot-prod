@@ -34,6 +34,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     pendingFinalizations,
     pendingGuiltyReplies
   } = state;
+  const allowedGuildId = config.allowedGuildId;
 
   function isSteward(member) {
     return member.roles?.cache?.has(config.stewardRoleId);
@@ -573,7 +574,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   };
 
   client.once('ready', () => {
-    console.log(`✅ Bot is online als ${client.user.tag}`);
+    const lockNote = allowedGuildId ? ` (locked to guild ${allowedGuildId})` : '';
+    console.log(`✅ Bot is online als ${client.user.tag}${lockNote}`);
   });
 
   // Slash command registratie
@@ -619,11 +621,31 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
     ];
 
+    if (allowedGuildId) {
+      await client.application.commands.set([]);
+      const guild = await client.guilds.fetch(allowedGuildId).catch(() => null);
+      if (!guild) {
+        console.error(`Guild ${allowedGuildId} niet gevonden voor commando-registratie.`);
+        return;
+      }
+      await guild.commands.set(commands);
+      return;
+    }
+
     await client.application.commands.set(commands);
   });
 
   client.on('interactionCreate', async (interaction) => {
     try {
+      if (interaction.guildId && allowedGuildId && interaction.guildId !== allowedGuildId) {
+        try {
+          await interaction.reply({
+            content: '❌ Deze bot is alleen beschikbaar op de hoofdserver.',
+            ephemeral: true
+          });
+        } catch {}
+        return;
+      }
       // 1) Slash command: knop plaatsen
       if (interaction.isChatInputCommand() && interaction.commandName === 'raceincident') {
         const subcommand = interaction.options.getSubcommand();

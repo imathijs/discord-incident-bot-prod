@@ -35,9 +35,11 @@ const isAllowedEvidenceUrl = (url) => {
 function registerMessageHandlers(client, { config, state }) {
   const { pendingEvidence, activeIncidents, pendingGuiltyReplies, autoDeleteMs } = state;
   const incidentChatChannelId = config.incidentChatChannelId;
+  const allowedGuildId = config.allowedGuildId;
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    if (message.guildId && allowedGuildId && message.guildId !== allowedGuildId) return;
 
     const pendingByUser = pendingGuiltyReplies.get(message.author.id);
     if (!message.guildId && pendingByUser && typeof pendingByUser.get === 'function') {

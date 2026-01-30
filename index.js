@@ -50,6 +50,20 @@ const state = createState(config);
 registerInteractionHandlers(client, { config, state, generateIncidentNumber });
 registerMessageHandlers(client, { config, state });
 
+client.on('ready', async () => {
+  if (!config.allowedGuildId) return;
+  const otherGuilds = client.guilds.cache.filter((g) => g.id !== config.allowedGuildId);
+  for (const guild of otherGuilds.values()) {
+    await guild.leave().catch(() => {});
+  }
+});
+
+client.on('guildCreate', async (guild) => {
+  if (!config.allowedGuildId) return;
+  if (guild.id === config.allowedGuildId) return;
+  await guild.leave().catch(() => {});
+});
+
 if (!token) {
   console.error('DISCORD_TOKEN ontbreekt. Zet deze als environment variable en start opnieuw.');
   process.exit(1);

@@ -44,6 +44,7 @@ Vul je IDs in:
 - `resolvedThreadId` – thread voor besluiten (optioneel)
 - `incidentChatChannelId` – kanaal voor @bot berichten
 - `stewardRoleId` – rol‑ID van stewards
+- `allowedGuildId` – server‑ID waar de bot mag werken (laat leeg voor alle servers)
 
 Tip: Zet “Developer Mode” aan in Discord om IDs te kopieren.
 

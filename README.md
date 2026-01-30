@@ -27,6 +27,7 @@ De meeste instellingen staan in `config.json`:
 - `resolvedChannelId` – kanaal voor afgehandelde incidenten
 - `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
 - `stewardRoleId` – rol-ID voor stewards
+- `allowedGuildId` – server-ID waar de bot is toegestaan (laat leeg voor alle servers)
 - `incidentCounter` – teller voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – auto‑delete van DM‑berichten/opties
 - `googleSheetsEnabled` – zet Google Sheets logging aan/uit

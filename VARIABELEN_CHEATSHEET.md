@@ -12,6 +12,7 @@ Belangrijkste velden (gebruik je eigen IDs):
 - `resolvedThreadId` – thread‑ID waar het besluit te vinden is (wordt in DM gedeeld)
 - `incidentChatChannelId` – kanaal waar @bot berichten worden doorgestuurd
 - `stewardRoleId` – rol-ID van stewards (toegang / mentions)
+- `allowedGuildId` – server-ID waar de bot mag werken (laat leeg voor alle servers)
 - `incidentCounter` – teller voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – aantal uur voordat DM‑uploads / bot‑berichten worden verwijderd
 - `googleSheetsEnabled` – zet Google Sheets logging aan/uit
@@ -26,6 +27,7 @@ Voorbeeld:
   "resolvedChannelId": "1234567890",
   "incidentChatChannelId": "1234567890",
   "stewardRoleId": "1234567890",
+  "allowedGuildId": "",
   "incidentCounter": 2026000,
   "autoDeleteHours": 24,
   "googleSheetsEnabled": false,
