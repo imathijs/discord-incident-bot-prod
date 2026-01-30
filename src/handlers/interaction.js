@@ -60,6 +60,165 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
   };
 
+  const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
+
+  const getEmbedFieldValue = (embed, name) => {
+    const fields = embed?.fields || [];
+    const match = fields.find((field) => field.name === name);
+    return match?.value ? String(match.value).trim() : '';
+  };
+
+  const extractIncidentNumberFromEmbed = (embed) => {
+    const fromField = getEmbedFieldValue(embed, '🔢 Incidentnummer');
+    if (fromField) return fromField;
+    const title = embed?.title || '';
+    const match = String(title).match(/INC-\d+/i);
+    return match ? match[0].toUpperCase() : '';
+  };
+
+  const extractUserIdFromText = (value) => {
+    const match = String(value || '').match(/<@!?(\d+)>/);
+    return match ? match[1] : null;
+  };
+
+  const parseVoteLines = (text) => {
+    const lines = String(text || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const votes = new Map();
+    for (const line of lines) {
+      if (/^Nog geen stemmen\./i.test(line)) continue;
+      const userMatch = line.match(/<@!?(\d+)>/);
+      if (!userMatch) continue;
+      const userId = userMatch[1];
+      const parts = line.split('→');
+      const tokens = (parts[1] || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+      const entry = { category: null, plus: false, minus: false };
+      for (const token of tokens) {
+        const upper = token.toUpperCase();
+        if (/^CAT[0-5]$/.test(upper)) entry.category = upper.toLowerCase();
+        if (token === '+1') entry.plus = true;
+        if (token === '-1') entry.minus = true;
+      }
+      votes.set(userId, entry);
+    }
+    return votes;
+  };
+
+  const parseVotesFromEmbed = (embed) => {
+    const votes = {};
+    const fields = embed?.fields || [];
+    const reporterLabel = getEmbedFieldValue(embed, '👤 Ingediend door');
+    const normalizeLabel = (value) =>
+      String(value || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    const reporterNormalized = normalizeLabel(reporterLabel);
+    const voteFields = fields.filter((field) => field?.name?.startsWith('🗳️ Stemmen - '));
+    let reporterMatched = false;
+    for (let i = 0; i < voteFields.length; i += 1) {
+      const field = voteFields[i];
+      if (!field?.name || !field?.value) continue;
+      const label = normalizeLabel(field.name.replace('🗳️ Stemmen - ', ''));
+      let isReporter = reporterNormalized && label.includes(reporterNormalized);
+      if (isReporter) reporterMatched = true;
+      if (!isReporter && !reporterMatched && voteFields.length > 1 && i === 1) {
+        isReporter = true;
+      }
+      const parsed = parseVoteLines(field.value);
+      for (const [userId, entry] of parsed.entries()) {
+        const existing =
+          votes[userId] ||
+          (votes[userId] = {
+            category: null,
+            plus: false,
+            minus: false,
+            reporterCategory: null,
+            reporterPlus: false,
+            reporterMinus: false
+          });
+        if (isReporter) {
+          if (entry.category) existing.reporterCategory = entry.category;
+          if (entry.plus) existing.reporterPlus = true;
+          if (entry.minus) existing.reporterMinus = true;
+        } else {
+          if (entry.category) existing.category = entry.category;
+          if (entry.plus) existing.plus = true;
+          if (entry.minus) existing.minus = true;
+        }
+      }
+    }
+    return votes;
+  };
+
+  const extractSheetRowNumber = (embed) => {
+    const footer = embed?.footer?.text || '';
+    const match = String(footer).match(/SheetRow:(\d+)/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const hydrateIncidentFromMessage = (message) => {
+    const embed = message?.embeds?.[0];
+    if (!embed) return null;
+    const incidentNumber = extractIncidentNumberFromEmbed(embed);
+    if (!incidentNumber) return null;
+    const guiltyValue = getEmbedFieldValue(embed, '⚠️ Schuldige rijder') || 'Onbekend';
+    const reporterValue = getEmbedFieldValue(embed, '👤 Ingediend door') || 'Onbekend';
+    const votes = parseVotesFromEmbed(embed);
+    return {
+      votes,
+      incidentNumber,
+      division: getEmbedFieldValue(embed, '🏁 Divisie') || 'Onbekend',
+      raceName: getEmbedFieldValue(embed, '🏁 Race') || 'Onbekend',
+      round: getEmbedFieldValue(embed, '🔢 Ronde') || 'Onbekend',
+      corner: getEmbedFieldValue(embed, '🏁 Circuit') || 'Onbekend',
+      guiltyId: extractUserIdFromText(guiltyValue),
+      guiltyDriver: guiltyValue,
+      reason: getEmbedFieldValue(embed, '📌 Reden') || 'Onbekend',
+      reporter: reporterValue,
+      reporterId: extractUserIdFromText(reporterValue),
+      sheetRowNumber: extractSheetRowNumber(embed)
+    };
+  };
+
+  const findIncidentMessageByNumber = async (voteChannel, normalizedTicket, maxMessages = 300) => {
+    let remaining = Math.max(0, maxMessages);
+    let before = undefined;
+    while (remaining > 0) {
+      const batch = await voteChannel.messages.fetch({ limit: Math.min(100, remaining), before });
+      if (!batch.size) break;
+      for (const message of batch.values()) {
+        const embed = message.embeds?.[0];
+        const ticketFromEmbed = extractIncidentNumberFromEmbed(embed);
+        const matches =
+          (ticketFromEmbed && normalizeIncidentNumber(ticketFromEmbed) === normalizedTicket) ||
+          normalizeIncidentNumber(message.content).includes(normalizedTicket) ||
+          normalizeIncidentNumber(embed?.title).includes(normalizedTicket);
+        if (matches) return message;
+      }
+      remaining -= batch.size;
+      before = batch.last().id;
+    }
+    return null;
+  };
+
+  const recoverIncidentByNumber = async (ticketNumber) => {
+    const normalizedTicket = normalizeIncidentNumber(ticketNumber);
+    const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+    if (!voteChannel) return null;
+    const message = await findIncidentMessageByNumber(voteChannel, normalizedTicket);
+    if (!message) return null;
+    const incidentData = hydrateIncidentFromMessage(message);
+    if (!incidentData) return null;
+    activeIncidents.set(message.id, incidentData);
+    return [message.id, incidentData];
+  };
+
   const buildIncidentModal = ({ raceName, round, corner, description } = {}) => {
     const modal = new ModalBuilder().setCustomId('incident_modal').setTitle('Race Incident Melding');
 
@@ -338,6 +497,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       sheetRowNumber
     });
 
+    if (sheetRowNumber) {
+      const enrichedEmbed = EmbedBuilder.from(incidentEmbed).setFooter({ text: `SheetRow:${sheetRowNumber}` });
+      try {
+        await editMessageWithRetry(
+          message,
+          { embeds: [enrichedEmbed], components: message.components },
+          'Add sheet row footer',
+          { userId: interaction.user?.id }
+        );
+      } catch {}
+    }
+
     if (pending.guiltyId) {
       try {
         const guiltyUser = await client.users.fetch(pending.guiltyId).catch(() => null);
@@ -521,6 +692,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           }
 
           if (!matchEntry) {
+            matchEntry = await recoverIncidentByNumber(ticketNumber);
+          }
+
+          if (!matchEntry) {
             return interaction.reply({
               content: '❌ Incident niet gevonden of al afgehandeld.',
               ephemeral: true
@@ -564,6 +739,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             matchEntry = entry;
             break;
           }
+        }
+
+        if (!matchEntry) {
+          matchEntry = await recoverIncidentByNumber(ticketNumber);
         }
 
         if (!matchEntry) {
@@ -1069,7 +1248,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         // 5) Stemmen / toggles / afsluiten
-        const incidentData = activeIncidents.get(interaction.message.id);
+        let incidentData = activeIncidents.get(interaction.message.id);
+        if (!incidentData) {
+          const recovered = hydrateIncidentFromMessage(interaction.message);
+          if (recovered) {
+            activeIncidents.set(interaction.message.id, recovered);
+            incidentData = recovered;
+          }
+        }
         const isVoteMessage = !!incidentData;
 
         // Laat andere knoppen met rust
@@ -1342,12 +1528,6 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', ephemeral: true });
         }
 
-        const incidentData = activeIncidents.get(pending.messageId);
-        if (!incidentData) {
-          pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Incident niet gevonden of al afgehandeld.', ephemeral: true });
-        }
-
         if (!isSteward(interaction.member)) {
           pendingFinalizations.delete(interaction.user.id);
           return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', ephemeral: true });
@@ -1359,6 +1539,20 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         const voteMessage = await voteChannel.messages.fetch(pending.messageId).catch(() => null);
+        let incidentData = activeIncidents.get(pending.messageId);
+        if (!incidentData && voteMessage) {
+          const recovered = hydrateIncidentFromMessage(voteMessage);
+          if (recovered) {
+            activeIncidents.set(pending.messageId, recovered);
+            incidentData = recovered;
+          }
+        }
+
+        if (!incidentData) {
+          pendingFinalizations.delete(interaction.user.id);
+          return interaction.reply({ content: '❌ Incident niet gevonden of al afgehandeld.', ephemeral: true });
+        }
+
         if (!voteMessage) {
           pendingFinalizations.delete(interaction.user.id);
           return interaction.reply({ content: '❌ Stem-bericht niet gevonden.', ephemeral: true });
@@ -1406,7 +1600,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         } catch {}
         await voteMessage.reply({ embeds: [resultEmbed] });
 
-        const resolvedChannel = await client.channels.fetch(config.resolvedChannelId).catch(() => null);
+        const resolvedTargetId = config.resolvedThreadId || config.resolvedChannelId;
+        const resolvedChannel = resolvedTargetId
+          ? await client.channels.fetch(resolvedTargetId).catch(() => null)
+          : null;
         if (resolvedChannel) {
           const reportEmbed = new EmbedBuilder()
             .setColor('#2ECC71')
@@ -1434,6 +1631,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             )
             .setTimestamp();
         await resolvedChannel.send({ embeds: [reportEmbed] });
+        } else {
+          console.warn('Resolved target not found or not accessible', {
+            resolvedTargetId,
+            incidentNumber: incidentData.incidentNumber || 'Onbekend'
+          });
         }
 
         await updateIncidentResolution({
