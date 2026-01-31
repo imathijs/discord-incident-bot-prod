@@ -1,13 +1,13 @@
 # DRE Race Incident Bot *Production*
 
-Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, stemmen door stewards, bewijs uploaden, wederwoord en afhandeling.
+Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, stemmen door stewards, bewijs uploaden en afhandeling.
 
 ## Wat doet de bot?
 - Plaatst een meldknop in het meld‑kanaal.
 - Laat rijders een incident indienen via een begeleide flow (divisie → reden → schuldige → race/ronde/bocht → beschrijving).
 - Stuurt de melding door naar het stewards kanaal met stemknoppen.
 - Vraagt de melder om bewijs te uploaden (DM of kanaal).
-- Stuurt een DM naar de schuldige rijder om te reageren (éénmalig, binnen 2 dagen).
+- Stuurt een DM naar de schuldige rijder om tijdens de behandeling éénmalig te reageren (binnen 2 dagen).
 - Laat stewards stemmen en het eindoordeel publiceren.
 - Publiceert afgehandelde incidenten in het resolved kanaal.
 - Logt incidenten optioneel extern in Google Sheets.
@@ -17,7 +17,7 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 2) Melder kiest divisie + reden + schuldige, vult race/ronde/bocht/beschrijving in en bevestigt.
 3) Incident verschijnt in het stewards kanaal met stemknoppen.
 4) Melder uploadt bewijs via DM (of kanaal).
-5) Schuldige ontvangt DM en kan één keer reageren (max 2 dagen).
+5) Schuldige ontvangt DM en kan tijdens de behandeling één keer reageren (max 2 dagen).
 6) Steward sluit af met eindoordeel; bot plaatst dit in het resolved kanaal.
 
 ## Configuratie
@@ -50,7 +50,6 @@ De meeste instellingen staan in `config.json`:
 ## Tijdslimieten (in `src/constants.js`)
 - `evidenceWindowMs`
 - `incidentReportWindowMs`
-- `appealWindowMs`
 - `finalizeWindowMs`
 - `guiltyReplyWindowMs`
 

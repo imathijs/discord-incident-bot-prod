@@ -56,7 +56,6 @@ Bestand: `src/constants.js`
 Hier pas je tijden (ms) aan:
 - `evidenceWindowMs` – tijd om bewijs te uploaden
 - `incidentReportWindowMs` – tijd om incident te voltooien
-- `appealWindowMs` – tijd om wederwoord te voltooien
 - `finalizeWindowMs` – tijd om eindoordeel te vullen
 - `guiltyReplyWindowMs` – **2 dagen** voor reactie van de schuldige
 

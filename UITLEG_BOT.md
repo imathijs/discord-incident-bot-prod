@@ -1,7 +1,7 @@
 # Uitleg DRE Race Incident Bot
 
 ## Algemene uitleg
-De DRE Race Incident Bot ondersteunt het hele incident‑proces in Discord. Rijders kunnen incidenten melden, bewijs uploaden en stewards kunnen stemmen en een besluit nemen. Na afhandeling krijgt de schuldige rijder een directe mogelijkheid om éénmalig zijn/haar visie te geven via een knop bij het afgehandelde incident.
+De DRE Race Incident Bot ondersteunt het hele incident‑proces in Discord. Rijders kunnen incidenten melden, bewijs uploaden en stewards kunnen stemmen en een besluit nemen. De schuldige rijder kan tijdens de behandeling éénmalig reageren via DM (binnen 2 dagen).
 
 De bot verzorgt:
 - een duidelijke meldflow voor incidenten;
@@ -9,7 +9,7 @@ De bot verzorgt:
 - een stemproces voor stewards;
 - publicatie van uitslagen in het resolved kanaal (incl. divisie);
 - optionele logging van incidenten in Google Sheets (status wordt bijgewerkt bij afhandeling);
-- een gecontroleerd wederwoord‑moment voor de schuldige.
+- een optionele DM‑reactie van de schuldige tijdens de behandeling.
 
 ## Incident melder – stappen
 1) Ga naar het meld‑kanaal en klik op **Meld Incident**.
@@ -22,18 +22,6 @@ De bot verzorgt:
 8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs wordt toegevoegd aan het incident.
 9) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
 
-## Incident schuldige – jouw visie geven
-Wanneer een incident is afgehandeld:
-1) In het afgehandelde incident staat een knop **Wederwoord indienen** met de tekst:
-   “Niet eens met dit besluit? Klik hier om je reactie te versturen.”
-2) Alleen de schuldige rijder kan deze knop gebruiken.
-3) Na het klikken verschijnt een formulier waarin je jouw verhaal en eventueel bewijs kunt delen.
-4) Je reactie wordt doorgestuurd naar de stewards als officiële reactie tegenpartij.
-
-Belangrijk:
-- Je mag je reactie maar één keer indienen.
-- Reactie moet binnen 2 dagen na het incident worden ingestuurd.
-
 ## Infographic (Mermaid)
 ```mermaid
 flowchart LR
@@ -45,8 +33,6 @@ flowchart LR
   F --> G[Stewards kanaal + divisie]
   G --> H[Stemmen + eindoordeel + divisie]
   H --> I[Resolved kanaal + divisie]
-  I --> J[Schuldige: Wederwoord indienen]
-  J --> K[Reactie naar stewards]
 ```
 
 ## Infographic (SVG)

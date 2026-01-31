@@ -31,15 +31,13 @@
   <!-- Guilty flow -->
   <rect x="40" y="320" width="520" height="180" class="box"/>
   <text x="60" y="350" class="title">Schuldige rijder</text>
-  <text x="60" y="380" class="text">1. Ziet besluit in resolved kanaal</text>
-  <text x="60" y="400" class="text">2. Klikt op “Wederwoord indienen”</text>
-  <text x="60" y="420" class="text">3. Stuurt éénmalig reactie (binnen 2 dagen)</text>
+  <text x="60" y="380" class="text">1. Ontvangt DM om te reageren (optioneel)</text>
+  <text x="60" y="400" class="text">2. Reageert éénmalig (binnen 2 dagen)</text>
 
   <!-- Resolved flow -->
   <rect x="640" y="320" width="520" height="180" class="box"/>
   <text x="660" y="350" class="title">Afhandeling</text>
   <text x="660" y="380" class="text">1. Eindoordeel geplaatst in resolved kanaal</text>
-  <text x="660" y="400" class="text">2. Reactie schuldige naar stewards</text>
 
   <!-- Arrows -->
   <line x1="560" y1="180" x2="640" y2="180" class="arrow"/>
