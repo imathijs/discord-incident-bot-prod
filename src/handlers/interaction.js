@@ -7,6 +7,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
   PermissionFlagsBits,
+  MessageFlags,
   UserSelectMenuBuilder,
   ApplicationCommandOptionType
 } = require('discord.js');
@@ -656,7 +657,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         try {
           await interaction.reply({
             content: '❌ Deze bot is alleen beschikbaar op de hoofdserver.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         } catch {}
         return;
@@ -668,7 +669,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (interaction.channelId !== config.reportChannelId) {
             return interaction.reply({
               content: '❌ Incident melden kan alleen in de ingestelde forum-thread.',
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           }
 
@@ -709,12 +710,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (interaction.channelId !== config.voteChannelId) {
             return interaction.reply({
               content: '❌ Afhandelen kan alleen in het stewards-kanaal.',
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           }
 
           if (!isSteward(interaction.member)) {
-            return interaction.reply({ content: '❌ Alleen stewards kunnen afhandelen!', ephemeral: true });
+            return interaction.reply({ content: '❌ Alleen stewards kunnen afhandelen!', flags: MessageFlags.Ephemeral });
           }
 
           const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
@@ -735,7 +736,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (!matchEntry) {
             return interaction.reply({
               content: '❌ Incident niet gevonden of al afgehandeld.',
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           }
 
@@ -767,7 +768,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         if (subcommand !== 'neemterug') {
-          return interaction.reply({ content: '❌ Onbekende subcommand.', ephemeral: true });
+          return interaction.reply({ content: '❌ Onbekende subcommand.', flags: MessageFlags.Ephemeral });
         }
 
         const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
@@ -788,7 +789,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (!matchEntry) {
           return interaction.reply({
             content: '❌ Incident niet gevonden of al afgehandeld.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
 
@@ -799,7 +800,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (interaction.user.id !== reporterId) {
           return interaction.reply({
             content: '❌ Alleen de indiener kan dit incident terugnemen.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
         const isReporter =
@@ -809,11 +810,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (!isReporter) {
           return interaction.reply({
             content: '❌ Alleen de melder van dit incident kan het terugnemen.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const respond = (payload) =>
           interaction.replied || interaction.deferred ? interaction.editReply(payload) : interaction.reply(payload);
 
@@ -895,7 +896,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (interaction.channelId !== config.reportChannelId) {
           return interaction.reply({
             content: '❌ Incident melden kan alleen in het meld-kanaal.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
 
@@ -909,7 +910,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         await interaction.reply({
           content: 'In welke divisie rij je?',
           components: [divisionRow],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -917,7 +918,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       // 2b) Divisie selecteren: daarna reden knoppen tonen
       if (interaction.isButton() && interaction.customId.startsWith('incident_division:')) {
         if (!interaction.guildId) {
-          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', ephemeral: true });
+          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', flags: MessageFlags.Ephemeral });
         }
 
         const divisionValue = interaction.customId.split(':')[1] || '';
@@ -954,13 +955,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (!guiltyId) {
           return interaction.reply({
             content: '❌ Kan schuldige rijder niet bepalen.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
         if (interaction.user.id !== guiltyId) {
           return interaction.reply({
             content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
         pendingAppeals.set(interaction.user.id, {
@@ -976,7 +977,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       // 3) Optielijst submit: reden bewaren en vraag om schuldige (User Select)
       if (interaction.isButton() && interaction.customId.startsWith('incident_reason:')) {
         if (!interaction.guildId) {
-          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', ephemeral: true });
+          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', flags: MessageFlags.Ephemeral });
         }
 
         const reasonValue = interaction.customId.split(':')[1] || '';
@@ -1007,7 +1008,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       // 3b) Dropdown submit: reden bewaren en vraag om schuldige (User Select)
       if (interaction.isStringSelectMenu() && interaction.customId === 'incident_reason') {
         if (!interaction.guildId) {
-          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', ephemeral: true });
+          return interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', flags: MessageFlags.Ephemeral });
         }
 
         const existing = pendingIncidentReports.get(interaction.user.id);
@@ -1030,7 +1031,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         await interaction.reply({
           content: 'Wie is de tegenpartij/schuldige?',
           components: [row],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -1039,7 +1040,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (interaction.isUserSelectMenu() && interaction.customId === 'incident_culprit_select') {
         const pending = pendingIncidentReports.get(interaction.user.id);
         if (!pending) {
-          return interaction.reply({ content: '❌ Sessie verlopen. Begin opnieuw.', ephemeral: true });
+          return interaction.reply({ content: '❌ Sessie verlopen. Begin opnieuw.', flags: MessageFlags.Ephemeral });
         }
 
         const selectedUserId = interaction.values[0];
@@ -1058,11 +1059,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (interaction.isModalSubmit() && interaction.customId === 'incident_modal') {
         const pending = pendingIncidentReports.get(interaction.user.id);
         if (!pending) {
-          return interaction.reply({ content: '❌ Geen open incident gevonden. Meld opnieuw.', ephemeral: true });
+          return interaction.reply({ content: '❌ Geen open incident gevonden. Meld opnieuw.', flags: MessageFlags.Ephemeral });
         }
         if (Date.now() > pending.expiresAt) {
           pendingIncidentReports.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', ephemeral: true });
+          return interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', flags: MessageFlags.Ephemeral });
         }
 
         const raceName = interaction.fields.getTextInputValue('race_naam').trim();
@@ -1070,7 +1071,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (!/^\d+$/.test(raceName) || !/^\d+$/.test(round)) {
           return interaction.reply({
             content: '❌ Vul bij **Welke race?** en **Welke ronde?** alleen cijfers in. Probeer het nog een keer.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
         const corner = interaction.fields.getTextInputValue('bocht').trim();
@@ -1105,7 +1106,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           new ButtonBuilder().setCustomId('incident_review_confirm').setLabel('✅ Bevestigen').setStyle(ButtonStyle.Success)
         );
 
-        await interaction.reply({ embeds: [reviewEmbed], components: [reviewButtons], ephemeral: true });
+        await interaction.reply({ embeds: [reviewEmbed], components: [reviewButtons], flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -1113,15 +1114,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (interaction.isModalSubmit() && interaction.customId === 'appeal_modal') {
         const pending = pendingAppeals.get(interaction.user.id);
         if (!pending) {
-          return interaction.reply({ content: '❌ Geen open wederwoord gevonden. Klik opnieuw op de knop.', ephemeral: true });
+          return interaction.reply({ content: '❌ Geen open wederwoord gevonden. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
         }
         if (Date.now() > pending.expiresAt) {
           pendingAppeals.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Tijd verlopen. Klik opnieuw op de knop.', ephemeral: true });
+          return interaction.reply({ content: '❌ Tijd verlopen. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
         }
         if (pending.allowedGuiltyId && pending.allowedGuiltyId !== interaction.user.id) {
           pendingAppeals.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.', ephemeral: true });
+          return interaction.reply({ content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.', flags: MessageFlags.Ephemeral });
         }
 
         const incidentNumberInput = interaction.fields.getTextInputValue('incident_nummer').trim();
@@ -1131,7 +1132,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
-          return interaction.reply({ content: '❌ Steward-kanaal niet gevonden! Check voteChannelId.', ephemeral: true });
+          return interaction.reply({ content: '❌ Steward-kanaal niet gevonden! Check voteChannelId.', flags: MessageFlags.Ephemeral });
         }
 
         const appealEmbed = new EmbedBuilder()
@@ -1184,7 +1185,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           content: pending.dmChannelId
             ? '✅ Wederwoord ontvangen! Check je DM voor eventuele beelden.'
             : '✅ Wederwoord ontvangen! Het is doorgestuurd naar de stewards.',
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1192,14 +1193,17 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (interaction.isButton()) {
         const id = interaction.customId;
 
+        if (id === 'finalize_confirm' || id === 'finalize_cancel') {
+          // handled below (finalize preview)
+        } else {
         if (id === 'incident_review_edit' || id === 'incident_review_confirm') {
           const pending = pendingIncidentReports.get(interaction.user.id);
           if (!pending) {
-            return interaction.reply({ content: '❌ Geen open incident gevonden. Meld opnieuw.', ephemeral: true });
+            return interaction.reply({ content: '❌ Geen open incident gevonden. Meld opnieuw.', flags: MessageFlags.Ephemeral });
           }
           if (Date.now() > pending.expiresAt) {
             pendingIncidentReports.delete(interaction.user.id);
-            return interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', ephemeral: true });
+            return interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', flags: MessageFlags.Ephemeral });
           }
 
           if (id === 'incident_review_edit') {
@@ -1217,7 +1221,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             return;
           }
 
-          await interaction.deferReply({ ephemeral: true });
+          await interaction.deferReply({ flags: MessageFlags.Ephemeral });
           await submitIncidentReport(interaction, pending);
           return;
         }
@@ -1228,13 +1232,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           if (!pending) {
             return interaction.reply({
               content: '❌ Geen open bewijs-upload gevonden.',
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           }
           if (pending.channelId !== interaction.channelId) {
             return interaction.reply({
               content: '❌ Bewijs uploaden kan alleen in het juiste kanaal.',
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           }
 
@@ -1242,7 +1246,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             pendingEvidence.delete(interaction.user.id);
             return interaction.reply({
               content: '❌ Tijd verlopen. Start de melding opnieuw.',
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           }
 
@@ -1259,7 +1263,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
                 pendingType === 'appeal'
                   ? `✅ Je kunt extra beelden uploaden of links delen${incidentLabel} voor je wederwoord. Upload of stuur binnen 5 minuten.`
                   : `✅ Je kunt extra beelden uploaden of links delen${incidentLabel}. Upload of stuur binnen 5 minuten.`,
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           }
 
@@ -1283,7 +1287,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               pendingType === 'appeal'
                 ? `✅ Wederwoord${incidentLabel} bijgewerkt. Bedankt voor het bewijs.`
                 : `✅ Incident${incidentLabel} bijgewerkt. Bedankt voor het bewijs.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
 
@@ -1303,12 +1307,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         // Stemmen alleen in voteChannel
         if (interaction.channelId !== config.voteChannelId) {
-          return interaction.reply({ content: '❌ Stemmen kan alleen in het stem-kanaal.', ephemeral: true });
+          return interaction.reply({ content: '❌ Stemmen kan alleen in het stem-kanaal.', flags: MessageFlags.Ephemeral });
         }
 
         // Alleen stewards
         if (!isSteward(interaction.member)) {
-          return interaction.reply({ content: '❌ Alleen stewards kunnen stemmen!', ephemeral: true });
+          return interaction.reply({ content: '❌ Alleen stewards kunnen stemmen!', flags: MessageFlags.Ephemeral });
         }
 
         // Zorg dat gebruiker entry heeft
@@ -1348,7 +1352,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return;
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const guiltyLabel = incidentData.guiltyDriver || 'Onbekend';
         const reporterLabel = incidentData.reporter || 'Onbekend';
@@ -1383,13 +1387,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               { userId: interaction.user?.id }
             );
           } catch {
-            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.' });
           }
           return interaction.editReply({
             content: isSame
               ? '✅ Stem voor de schuldige ingetrokken.'
-              : `✅ Stem geregistreerd: **${cat.toUpperCase()}**`,
-            ephemeral: true
+              : `✅ Stem geregistreerd: **${cat.toUpperCase()}**`
           });
         }
 
@@ -1418,13 +1421,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               { userId: interaction.user?.id }
             );
           } catch {
-            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.' });
           }
           return interaction.editReply({
             content: isSame
               ? '✅ Stem voor de indiener ingetrokken.'
-              : `✅ Stem geregistreerd: **${cat.toUpperCase()}** (indiener)`,
-            ephemeral: true
+              : `✅ Stem geregistreerd: **${cat.toUpperCase()}** (indiener)`
           });
         }
 
@@ -1452,11 +1454,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               { userId: interaction.user?.id }
             );
           } catch {
-            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.' });
           }
           return interaction.editReply({
-            content: `✅ + Strafpunt is nu **${entry.plus ? 'AAN' : 'UIT'}** (voor jouw stem)`,
-            ephemeral: true
+            content: `✅ + Strafpunt is nu **${entry.plus ? 'AAN' : 'UIT'}** (voor jouw stem)`
           });
         }
 
@@ -1484,11 +1485,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               { userId: interaction.user?.id }
             );
           } catch {
-            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.' });
           }
           return interaction.editReply({
-            content: `✅ - Strafpunt is nu **${entry.minus ? 'AAN' : 'UIT'}** (voor jouw stem)`,
-            ephemeral: true
+            content: `✅ - Strafpunt is nu **${entry.minus ? 'AAN' : 'UIT'}** (voor jouw stem)`
           });
         }
 
@@ -1516,11 +1516,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               { userId: interaction.user?.id }
             );
           } catch {
-            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.' });
           }
           return interaction.editReply({
-            content: `✅ + Strafpunt is nu **${entry.reporterPlus ? 'AAN' : 'UIT'}** (indiener)`,
-            ephemeral: true
+            content: `✅ + Strafpunt is nu **${entry.reporterPlus ? 'AAN' : 'UIT'}** (indiener)`
           });
         }
 
@@ -1548,12 +1547,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               { userId: interaction.user?.id }
             );
           } catch {
-            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.', ephemeral: true });
+            return interaction.editReply({ content: '❌ Kon het stem-bericht niet bijwerken.' });
           }
           return interaction.editReply({
-            content: `✅ - Strafpunt is nu **${entry.reporterMinus ? 'AAN' : 'UIT'}** (indiener)`,
-            ephemeral: true
+            content: `✅ - Strafpunt is nu **${entry.reporterMinus ? 'AAN' : 'UIT'}** (indiener)`
           });
+        }
         }
       }
 
@@ -1562,7 +1561,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           interaction.replied || interaction.deferred ? interaction.followUp(payload) : interaction.reply(payload);
         const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
-          return respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.', ephemeral: true });
+          return respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.', flags: MessageFlags.Ephemeral });
         }
 
         const voteMessage = await voteChannel.messages.fetch(pending.messageId).catch(() => null);
@@ -1577,12 +1576,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         if (!incidentData) {
           pendingFinalizations.delete(interaction.user.id);
-          return respond({ content: '❌ Incident niet gevonden of al afgehandeld.', ephemeral: true });
+          return respond({ content: '❌ Incident niet gevonden of al afgehandeld.', flags: MessageFlags.Ephemeral });
         }
 
         if (!voteMessage) {
           pendingFinalizations.delete(interaction.user.id);
-          return respond({ content: '❌ Stem-bericht niet gevonden.', ephemeral: true });
+          return respond({ content: '❌ Stem-bericht niet gevonden.', flags: MessageFlags.Ephemeral });
         }
 
         const tally = buildTallyText(incidentData.votes);
@@ -1646,7 +1645,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
                   content:
                     '⚠️ Bot heeft geen rechten om te posten in het resolved thread-kanaal. ' +
                     `Controleer "Send Messages in Threads" op <#${resolvedTargetId}>.`,
-                  ephemeral: true
+                  flags: MessageFlags.Ephemeral
                 });
                 return;
               }
@@ -1693,7 +1692,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
                 content:
                   '⚠️ Kon niet posten in het resolved thread-kanaal door ontbrekende permissies. ' +
                   `Controleer of de bot "Send Messages in Threads" heeft voor <#${resolvedTargetId}>.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
               });
             }
           }
@@ -1732,26 +1731,26 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           }
         })();
 
-        return respond({ content: '✅ Incident afgehandeld!', ephemeral: true });
+        return respond({ content: '✅ Incident afgehandeld!', flags: MessageFlags.Ephemeral });
       };
 
       // 6) Finalize modal submit: voorvertoning tonen
       if (interaction.isModalSubmit() && interaction.customId === 'finalize_modal') {
         const pending = pendingFinalizations.get(interaction.user.id);
         if (!pending) {
-          return interaction.reply({ content: '❌ Geen open afsluiting gevonden.', ephemeral: true });
+          return interaction.reply({ content: '❌ Geen open afsluiting gevonden.', flags: MessageFlags.Ephemeral });
         }
         if (Date.now() > pending.expiresAt) {
           pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', ephemeral: true });
+          return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', flags: MessageFlags.Ephemeral });
         }
 
         if (!isSteward(interaction.member)) {
           pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', ephemeral: true });
+          return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', flags: MessageFlags.Ephemeral });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         let finalText = interaction.fields.getTextInputValue('eindoordeel').trim();
         pending.finalText = finalText;
         pending.stage = 'preview';
@@ -1821,15 +1820,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (interaction.isButton() && (interaction.customId === 'finalize_confirm' || interaction.customId === 'finalize_cancel')) {
         const pending = pendingFinalizations.get(interaction.user.id);
         if (!pending || pending.stage !== 'preview') {
-          return interaction.reply({ content: '❌ Geen open voorvertoning gevonden.', ephemeral: true });
+          return interaction.reply({ content: '❌ Geen open voorvertoning gevonden.', flags: MessageFlags.Ephemeral });
         }
         if (Date.now() > pending.expiresAt) {
           pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', ephemeral: true });
+          return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', flags: MessageFlags.Ephemeral });
         }
         if (!isSteward(interaction.member)) {
           pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', ephemeral: true });
+          return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', flags: MessageFlags.Ephemeral });
         }
 
         if (interaction.customId === 'finalize_cancel') {
@@ -1837,15 +1836,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.update({
             content: '❎ Afhandeling geannuleerd. Start opnieuw om te bewerken.',
             components: [],
-            embeds: [],
-            ephemeral: true
+            embeds: []
           });
         }
 
         const finalText = String(pending.finalText || '').trim();
         if (!finalText) {
           pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Eindoordeel ontbreekt.', ephemeral: true });
+          return interaction.reply({ content: '❌ Eindoordeel ontbreekt.', flags: MessageFlags.Ephemeral });
         }
 
         await interaction.deferUpdate();
@@ -1856,7 +1854,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       console.error(err);
       await respondToInteraction(interaction, {
         content: '❌ Er ging iets mis. Check de bot logs.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   });
