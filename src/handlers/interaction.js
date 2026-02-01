@@ -36,6 +36,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     pendingGuiltyReplies
   } = state;
   const allowedGuildId = config.allowedGuildId;
+  const stewardIncidentThreadId = '1466753742002065531';
 
   function isSteward(member) {
     return member.roles?.cache?.has(config.stewardRoleId);
@@ -310,7 +311,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return modal;
   };
 
-  const buildReasonRows = () => {
+  const buildDivisionRow = (prefix = 'incident_division') =>
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`${prefix}:div1`).setLabel('Div 1').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`${prefix}:div2`).setLabel('Div 2').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`${prefix}:div3`).setLabel('Div 3').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`${prefix}:div4`).setLabel('Div 4').setStyle(ButtonStyle.Primary)
+    );
+
+  const buildReasonRows = (prefix = 'incident_reason') => {
     const rows = [];
     const reasonsPerRow = 5;
     for (let i = 0; i < incidentReasons.length; i += reasonsPerRow) {
@@ -319,7 +328,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       for (const reason of slice) {
         row.addComponents(
           new ButtonBuilder()
-            .setCustomId(`incident_reason:${reason.value}`)
+            .setCustomId(`${prefix}:${reason.value}`)
             .setLabel(reason.label)
             .setStyle(ButtonStyle.Primary)
         );
@@ -609,6 +618,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           },
           {
             type: ApplicationCommandOptionType.Subcommand,
+            name: 'stewardmelden',
+            description: 'Start incidentmelding namens een gebruiker (alleen steward-thread)'
+          },
+          {
+            type: ApplicationCommandOptionType.Subcommand,
             name: 'afhandelen',
             description: 'Handel een incident af (alleen stewards-kanaal)',
             options: [
@@ -701,6 +715,37 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
                 '- losse opname van het incident. Je upload het bestand via discord.'
               ].join('\n')
             );
+
+          await interaction.reply({ embeds: [embed], components: [row] });
+          return;
+        }
+
+        if (subcommand === 'stewardmelden') {
+          if (interaction.channelId !== stewardIncidentThreadId) {
+            return interaction.reply({
+              content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          if (!isSteward(interaction.member)) {
+            return interaction.reply({
+              content: '❌ Alleen stewards kunnen namens een gebruiker melden.',
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const reportButton = new ButtonBuilder()
+            .setCustomId('steward_report_incident')
+            .setLabel('🧾 Melding indienen')
+            .setStyle(ButtonStyle.Primary);
+
+          const row = new ActionRowBuilder().addComponents(reportButton);
+
+          const embed = new EmbedBuilder()
+            .setColor('#F39C12')
+            .setTitle('Steward incident melding')
+            .setDescription('Je kan hier als steward een melding indienen.');
 
           await interaction.reply({ embeds: [embed], components: [row] });
           return;
@@ -900,15 +945,41 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           });
         }
 
-        const divisionRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('incident_division:div1').setLabel('Div 1').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('incident_division:div2').setLabel('Div 2').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('incident_division:div3').setLabel('Div 3').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('incident_division:div4').setLabel('Div 4').setStyle(ButtonStyle.Primary)
-        );
+        const divisionRow = buildDivisionRow();
 
         await interaction.reply({
           content: 'In welke divisie rij je?',
+          components: [divisionRow],
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId === 'steward_report_incident') {
+        if (interaction.channelId !== stewardIncidentThreadId) {
+          return interaction.reply({
+            content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        if (!isSteward(interaction.member)) {
+          return interaction.reply({
+            content: '❌ Alleen stewards kunnen namens een gebruiker melden.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        pendingIncidentReports.set(interaction.user.id, {
+          source: 'steward',
+          stewardId: interaction.user.id,
+          stewardTag: interaction.user.tag,
+          expiresAt: Date.now() + incidentReportWindowMs
+        });
+
+        const divisionRow = buildDivisionRow('steward_incident_division');
+        await interaction.reply({
+          content: 'Welke divisie?',
           components: [divisionRow],
           flags: MessageFlags.Ephemeral
         });
@@ -940,11 +1011,142 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           expiresAt: Date.now() + incidentReportWindowMs
         });
 
-        const reasonRows = buildReasonRows();
+        const reasonRows = buildReasonRows('incident_reason');
         await interaction.update({
           content: 'Kies de reden van het incident.',
           components: reasonRows
         });
+        return;
+      }
+
+      // 2b-steward) Divisie selecteren: daarna reporter kiezen
+      if (interaction.isButton() && interaction.customId.startsWith('steward_incident_division:')) {
+        if (interaction.channelId !== stewardIncidentThreadId) {
+          return interaction.reply({
+            content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        if (!isSteward(interaction.member)) {
+          return interaction.reply({
+            content: '❌ Alleen stewards kunnen namens een gebruiker melden.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const pending = pendingIncidentReports.get(interaction.user.id);
+        if (!pending || pending.source !== 'steward') {
+          return interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
+        }
+
+        const divisionValue = interaction.customId.split(':')[1] || '';
+        const divisionMap = {
+          div1: 'Div 1',
+          div2: 'Div 2',
+          div3: 'Div 3',
+          div4: 'Div 4'
+        };
+        const division = divisionMap[divisionValue] || 'Onbekend';
+
+        pendingIncidentReports.set(interaction.user.id, {
+          ...pending,
+          division,
+          expiresAt: Date.now() + incidentReportWindowMs
+        });
+
+        const reporterSelect = new UserSelectMenuBuilder()
+          .setCustomId('steward_incident_reporter_select')
+          .setPlaceholder('Voor wie dien je hem in?')
+          .setMaxValues(1);
+
+        const row = new ActionRowBuilder().addComponents(reporterSelect);
+
+        await interaction.update({
+          content: 'Voor wie dien je hem in?',
+          components: [row]
+        });
+        return;
+      }
+
+      // 2c-steward) Reporter kiezen: daarna schuldige kiezen
+      if (interaction.isUserSelectMenu() && interaction.customId === 'steward_incident_reporter_select') {
+        if (interaction.channelId !== stewardIncidentThreadId) {
+          return interaction.reply({
+            content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        const pending = pendingIncidentReports.get(interaction.user.id);
+        if (!pending || pending.source !== 'steward') {
+          return interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
+        }
+
+        const selectedUserId = interaction.values[0];
+        const selectedUser = interaction.users.get(selectedUserId);
+        pending.reporterId = selectedUserId;
+        pending.reporterTag = selectedUser ? selectedUser.tag : `Onbekend (${selectedUserId})`;
+        pendingIncidentReports.set(interaction.user.id, pending);
+
+        const culpritSelect = new UserSelectMenuBuilder()
+          .setCustomId('steward_incident_culprit_select')
+          .setPlaceholder('Selecteer de schuldige rijder')
+          .setMaxValues(1);
+
+        const row = new ActionRowBuilder().addComponents(culpritSelect);
+
+        await interaction.update({
+          content: 'Kies de schuldige/tegenpartij.',
+          components: [row]
+        });
+        return;
+      }
+
+      // 2d-steward) Schuldige kiezen: daarna reden knoppen tonen
+      if (interaction.isUserSelectMenu() && interaction.customId === 'steward_incident_culprit_select') {
+        if (interaction.channelId !== stewardIncidentThreadId) {
+          return interaction.reply({
+            content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        const pending = pendingIncidentReports.get(interaction.user.id);
+        if (!pending || pending.source !== 'steward') {
+          return interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
+        }
+
+        const selectedUserId = interaction.values[0];
+        const selectedUser = interaction.users.get(selectedUserId);
+        pending.guiltyId = selectedUserId;
+        pending.guiltyTag = selectedUser ? selectedUser.tag : 'Onbekend';
+        pendingIncidentReports.set(interaction.user.id, pending);
+
+        const reasonRows = buildReasonRows('steward_incident_reason');
+        await interaction.update({
+          content: 'Kies de reden van het incident.',
+          components: reasonRows
+        });
+        return;
+      }
+
+      // 2e-steward) Reden kiezen: daarna modal tonen
+      if (interaction.isButton() && interaction.customId.startsWith('steward_incident_reason:')) {
+        if (interaction.channelId !== stewardIncidentThreadId) {
+          return interaction.reply({
+            content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        const pending = pendingIncidentReports.get(interaction.user.id);
+        if (!pending || pending.source !== 'steward') {
+          return interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
+        }
+
+        const reasonValue = interaction.customId.split(':')[1] || '';
+        pending.reasonValue = reasonValue;
+        pending.expiresAt = Date.now() + incidentReportWindowMs;
+        pendingIncidentReports.set(interaction.user.id, pending);
+
+        await interaction.showModal(buildIncidentModal());
         return;
       }
 
