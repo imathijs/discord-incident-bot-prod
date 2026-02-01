@@ -50,7 +50,7 @@ const state = createState(config);
 registerInteractionHandlers(client, { config, state, generateIncidentNumber });
 registerMessageHandlers(client, { config, state });
 
-client.on('ready', async () => {
+client.on('clientReady', async () => {
   if (!config.allowedGuildId) return;
   const otherGuilds = client.guilds.cache.filter((g) => g.id !== config.allowedGuildId);
   for (const guild of otherGuilds.values()) {

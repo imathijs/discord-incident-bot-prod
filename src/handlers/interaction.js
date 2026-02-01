@@ -22,7 +22,7 @@ const {
 const { buildTallyText, computePenaltyPoints, mostVotedCategory } = require('../utils/votes');
 const { buildEvidencePromptRow } = require('../utils/evidence');
 const { appendIncidentRow, updateIncidentStatus, updateIncidentResolution } = require('../utils/sheets');
-const { fetchTextTargetChannel } = require('../utils/channels');
+const { fetchTextTargetChannel, canSendToChannel } = require('../utils/channels');
 const { editMessageWithRetry } = require('../utils/messages');
 
 function registerInteractionHandlers(client, { config, state, generateIncidentNumber }) {
@@ -62,6 +62,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   };
 
   const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
+  const normalizeTicketInput = (value) => {
+    const normalized = normalizeIncidentNumber(value);
+    if (!normalized) return '';
+    if (normalized.startsWith('INC-')) return normalized;
+    if (/^\d+$/.test(normalized)) return `INC-${normalized}`;
+    return normalized;
+  };
 
   const getEmbedFieldValue = (embed, name) => {
     const fields = embed?.fields || [];
@@ -155,6 +162,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
     }
     return votes;
+  };
+
+  const respondToInteraction = (interaction, payload) => {
+    if (!interaction?.isRepliable?.()) return null;
+    if (interaction.replied || interaction.deferred) {
+      return interaction.followUp(payload).catch(() => null);
+    }
+    return interaction.reply(payload).catch(() => null);
   };
 
   const extractSheetRowNumber = (embed) => {
@@ -573,13 +588,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     });
   };
 
-  client.once('ready', () => {
+  client.once('clientReady', () => {
     const lockNote = allowedGuildId ? ` (locked to guild ${allowedGuildId})` : '';
     console.log(`✅ Bot is online als ${client.user.tag}${lockNote}`);
   });
 
   // Slash command registratie
-  client.on('ready', async () => {
+  client.on('clientReady', async () => {
     const commands = [
       {
         name: 'raceincident',
@@ -703,7 +718,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           }
 
           const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
-          const normalizedTicket = ticketNumber.toUpperCase();
+          const normalizedTicket = normalizeTicketInput(ticketNumber);
           let matchEntry = null;
           for (const entry of activeIncidents.entries()) {
             const incidentNumber = entry[1]?.incidentNumber || '';
@@ -724,11 +739,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             });
           }
 
-          const [messageId] = matchEntry;
+          const [messageId, incidentData] = matchEntry;
           pendingFinalizations.set(interaction.user.id, {
             messageId,
             channelId: interaction.channelId,
-            expiresAt: Date.now() + finalizeWindowMs
+            expiresAt: Date.now() + finalizeWindowMs,
+            incidentNumber: incidentData?.incidentNumber || normalizedTicket,
+            incidentSnapshot: incidentData || null
           });
 
           const modal = new ModalBuilder()
@@ -737,10 +754,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
           const decisionInput = new TextInputBuilder()
             .setCustomId('eindoordeel')
-            .setLabel('Eindoordeel (vrije tekst)')
+            .setLabel('Eindoordeel (Markdown toegestaan)')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
             .setMaxLength(4000);
+          decisionInput.setPlaceholder('Voorbeeld:\n**Besluit:**\n- CAT1, 1 strafpunt\n- Motivatie: ...');
 
           modal.addComponents(new ActionRowBuilder().addComponents(decisionInput));
 
@@ -753,7 +771,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
-        const normalizedTicket = ticketNumber.toUpperCase();
+        const normalizedTicket = normalizeTicketInput(ticketNumber);
         let matchEntry = null;
         for (const entry of activeIncidents.entries()) {
           const incidentNumber = entry[1]?.incidentNumber || '';
@@ -795,6 +813,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           });
         }
 
+        await interaction.deferReply({ ephemeral: true });
+        const respond = (payload) =>
+          interaction.replied || interaction.deferred ? interaction.editReply(payload) : interaction.reply(payload);
+
         for (const [userId, pending] of pendingEvidence.entries()) {
           if ((pending.incidentNumber || '').toUpperCase() === normalizedTicket) {
             pendingEvidence.delete(userId);
@@ -804,10 +826,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
-          return interaction.reply({
-            content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.',
-            ephemeral: true
-          });
+          return respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
         }
 
         const voteMessage = await voteChannel.messages.fetch(messageId).catch(() => null);
@@ -864,11 +883,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         activeIncidents.delete(messageId);
-        return interaction.reply({
+        return respond({
           content: deleted
             ? `✅ Incident **${ticketNumber}** is verwijderd.`
-            : `✅ Incident **${ticketNumber}** is teruggenomen en afgesloten.`,
-          ephemeral: true
+            : `✅ Incident **${ticketNumber}** is teruggenomen en afgesloten.`
         });
       }
 
@@ -1263,8 +1281,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({
             content:
               pendingType === 'appeal'
-                ? `✅ Wederwoord${incidentLabel} afgerond. Bedankt voor het bewijs.`
-                : `✅ Incident${incidentLabel} afgerond. Bedankt voor het bewijs.`,
+                ? `✅ Wederwoord${incidentLabel} bijgewerkt. Bedankt voor het bewijs.`
+                : `✅ Incident${incidentLabel} bijgewerkt. Bedankt voor het bewijs.`,
             ephemeral: true
           });
         }
@@ -1539,25 +1557,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
       }
 
-      // 6) Finalize modal submit: posten in stem- en afgehandeld-kanaal
-      if (interaction.isModalSubmit() && interaction.customId === 'finalize_modal') {
-        const pending = pendingFinalizations.get(interaction.user.id);
-        if (!pending) {
-          return interaction.reply({ content: '❌ Geen open afsluiting gevonden.', ephemeral: true });
-        }
-        if (Date.now() > pending.expiresAt) {
-          pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', ephemeral: true });
-        }
-
-        if (!isSteward(interaction.member)) {
-          pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', ephemeral: true });
-        }
-
+      const finalizeWithText = async ({ finalText, pending, interaction }) => {
+        const respond = (payload) =>
+          interaction.replied || interaction.deferred ? interaction.followUp(payload) : interaction.reply(payload);
         const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
         if (!voteChannel) {
-          return interaction.reply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.', ephemeral: true });
+          return respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.', ephemeral: true });
         }
 
         const voteMessage = await voteChannel.messages.fetch(pending.messageId).catch(() => null);
@@ -1572,12 +1577,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
         if (!incidentData) {
           pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Incident niet gevonden of al afgehandeld.', ephemeral: true });
+          return respond({ content: '❌ Incident niet gevonden of al afgehandeld.', ephemeral: true });
         }
 
         if (!voteMessage) {
           pendingFinalizations.delete(interaction.user.id);
-          return interaction.reply({ content: '❌ Stem-bericht niet gevonden.', ephemeral: true });
+          return respond({ content: '❌ Stem-bericht niet gevonden.', ephemeral: true });
         }
 
         const tally = buildTallyText(incidentData.votes);
@@ -1588,15 +1593,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         const reporterWinner = mostVotedCategory(incidentData.votes, 'reporter');
         const reporterDecision = reporterWinner ? reporterWinner.toUpperCase() : 'CAT0';
         const reporterPenaltyPoints = computePenaltyPoints(incidentData.votes, 'reporter');
-        let finalText = interaction.fields.getTextInputValue('eindoordeel').trim();
-        if (decision === 'CAT0') finalText = 'No futher action';
+        let finalTextValue = finalText;
+        if (decision === 'CAT0') finalTextValue = 'No futher action';
 
         const resultEmbed = new EmbedBuilder()
           .setColor('#00FF00')
           .setTitle('✅ Steward Besluit')
           .setDescription(
             `👤 Ingediend door: ${incidentData.reporter || 'Onbekend'}\n\n` +
-              `**Eindoordeel**\n${finalText}`
+              `**Eindoordeel**\n${finalTextValue}`
           )
           .addFields(
             { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
@@ -1622,75 +1627,237 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         } catch {}
         await voteMessage.reply({ embeds: [resultEmbed] });
 
-        const resolvedTargetId = config.resolvedThreadId || config.resolvedChannelId;
-        const resolvedChannel = resolvedTargetId
-          ? await client.channels.fetch(resolvedTargetId).catch(() => null)
-          : null;
-        if (resolvedChannel) {
-          const reportEmbed = new EmbedBuilder()
-            .setColor('#2ECC71')
-            .setTitle(`Incident Afgehandeld • ${incidentData.incidentNumber || 'Onbekend'}`)
-            .setDescription(`Uitslag van het stewardsoverleg.\n\n**Eindoordeel**\n${finalText}`)
-            .addFields(
-              { name: '\u200b', value: '\u200b' },
-              {
-                name: '⚖️ Besluit',
-                value:
-                  `Dader: **${decision}**  •  Strafmaat: **${penaltyPoints}**\n` +
-                  `Indiener: **${reporterDecision}**  •  Strafmaat: **${reporterPenaltyPoints}**`
-              },
-              { name: '\u200b', value: '\u200b' },
-              {
-                name: '🧾 Samenvatting',
-                value:
-                  `Incidentnummer: **${incidentData.incidentNumber || 'Onbekend'}**\n` +
-                  `Divisie: **${incidentData.division || 'Onbekend'}**\n` +
-                  `Race: **${incidentData.raceName}**  •  Ronde: **${incidentData.round}**\n` +
-                  `Ingediend door: **${incidentData.reporter || 'Onbekend'}**\n` +
-                  `Rijder: **${incidentData.guiltyDriver}**\n` +
-                  `Reden: **${incidentData.reason || 'Onbekend'}**`
-              }
-            )
-            .setTimestamp();
-        await resolvedChannel.send({ embeds: [reportEmbed] });
-        } else {
-          console.warn('Resolved target not found or not accessible', {
-            resolvedTargetId,
-            incidentNumber: incidentData.incidentNumber || 'Onbekend'
-          });
-        }
-
-        await updateIncidentResolution({
-          config,
-          rowNumber: incidentData.sheetRowNumber,
-          status: 'Afgehandeld',
-          stewardReport: finalText
-        });
-
-        const resolvedThreadId = config.resolvedThreadId || config.resolvedChannelId;
-        const dmText =
-          `Incident ticket ${incidentData.incidentNumber || 'Onbekend'} is afgehandeld. ` +
-          `Het besluit staat in kanaal Incidenten > Afgehandeld <#${resolvedThreadId}>`;
-        const dmTargets = [incidentData.reporterId, incidentData.guiltyId].filter(Boolean);
-        for (const userId of dmTargets) {
-          try {
-            const user = await client.users.fetch(userId).catch(() => null);
-            if (user) await user.send(dmText);
-          } catch {}
-        }
-
         activeIncidents.delete(pending.messageId);
         removePendingGuiltyReply(incidentData.incidentNumber);
         pendingFinalizations.delete(interaction.user.id);
-        return interaction.reply({ content: '✅ Incident afgehandeld!', ephemeral: true });
+
+        const resolvedTargetId = config.resolvedThreadId || config.resolvedChannelId;
+        void (async () => {
+          try {
+            const resolvedChannel = resolvedTargetId
+              ? await fetchTextTargetChannel(client, resolvedTargetId)
+              : null;
+            if (resolvedChannel) {
+              const botMember =
+                resolvedChannel.guild?.members?.me ||
+                (resolvedChannel.guild ? await resolvedChannel.guild.members.fetchMe().catch(() => null) : null);
+              if (!canSendToChannel(resolvedChannel, botMember)) {
+                await respondToInteraction(interaction, {
+                  content:
+                    '⚠️ Bot heeft geen rechten om te posten in het resolved thread-kanaal. ' +
+                    `Controleer "Send Messages in Threads" op <#${resolvedTargetId}>.`,
+                  ephemeral: true
+                });
+                return;
+              }
+              const reportEmbed = new EmbedBuilder()
+                .setColor('#2ECC71')
+                .setTitle(`Incident Afgehandeld • ${incidentData.incidentNumber || 'Onbekend'}`)
+                .setDescription(`Uitslag van het stewardsoverleg.\n\n**Eindoordeel**\n${finalTextValue}`)
+                .addFields(
+                  { name: '\u200b', value: '\u200b' },
+                  {
+                    name: '⚖️ Besluit',
+                    value:
+                      `Dader: **${decision}**  •  Strafmaat: **${penaltyPoints}**\n` +
+                      `Indiener: **${reporterDecision}**  •  Strafmaat: **${reporterPenaltyPoints}**`
+                  },
+                  { name: '\u200b', value: '\u200b' },
+                  {
+                    name: '🧾 Samenvatting',
+                    value:
+                      `Incidentnummer: **${incidentData.incidentNumber || 'Onbekend'}**\n` +
+                      `Divisie: **${incidentData.division || 'Onbekend'}**\n` +
+                      `Race: **${incidentData.raceName}**  •  Ronde: **${incidentData.round}**\n` +
+                      `Ingediend door: **${incidentData.reporter || 'Onbekend'}**\n` +
+                      `Rijder: **${incidentData.guiltyDriver}**\n` +
+                      `Reden: **${incidentData.reason || 'Onbekend'}**`
+                  }
+                )
+                .setTimestamp();
+              await resolvedChannel.send({ embeds: [reportEmbed] });
+            } else {
+              console.warn('Resolved target not found or not accessible', {
+                resolvedTargetId,
+                incidentNumber: incidentData.incidentNumber || 'Onbekend'
+              });
+            }
+          } catch (err) {
+            console.warn('Resolved send failed', {
+              resolvedTargetId,
+              incidentNumber: incidentData.incidentNumber || 'Onbekend',
+              error: err?.message
+            });
+            if (err?.code === 50013) {
+              await respondToInteraction(interaction, {
+                content:
+                  '⚠️ Kon niet posten in het resolved thread-kanaal door ontbrekende permissies. ' +
+                  `Controleer of de bot "Send Messages in Threads" heeft voor <#${resolvedTargetId}>.`,
+                ephemeral: true
+              });
+            }
+          }
+
+          try {
+            await updateIncidentResolution({
+              config,
+              rowNumber: incidentData.sheetRowNumber,
+              status: 'Afgehandeld',
+              stewardReport: finalTextValue
+            });
+          } catch (err) {
+            console.warn('Update incident resolution failed', {
+              incidentNumber: incidentData.incidentNumber || 'Onbekend',
+              error: err?.message
+            });
+          }
+
+          try {
+            const resolvedThreadId = config.resolvedThreadId || config.resolvedChannelId;
+            const dmText =
+              `Incident ticket ${incidentData.incidentNumber || 'Onbekend'} is afgehandeld. ` +
+              `Het besluit staat in kanaal Incidenten > Afgehandeld <#${resolvedThreadId}>`;
+            const dmTargets = [incidentData.reporterId, incidentData.guiltyId].filter(Boolean);
+            for (const userId of dmTargets) {
+              try {
+                const user = await client.users.fetch(userId).catch(() => null);
+                if (user) await user.send(dmText);
+              } catch {}
+            }
+          } catch (err) {
+            console.warn('Resolved DM notify failed', {
+              incidentNumber: incidentData.incidentNumber || 'Onbekend',
+              error: err?.message
+            });
+          }
+        })();
+
+        return respond({ content: '✅ Incident afgehandeld!', ephemeral: true });
+      };
+
+      // 6) Finalize modal submit: voorvertoning tonen
+      if (interaction.isModalSubmit() && interaction.customId === 'finalize_modal') {
+        const pending = pendingFinalizations.get(interaction.user.id);
+        if (!pending) {
+          return interaction.reply({ content: '❌ Geen open afsluiting gevonden.', ephemeral: true });
+        }
+        if (Date.now() > pending.expiresAt) {
+          pendingFinalizations.delete(interaction.user.id);
+          return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', ephemeral: true });
+        }
+
+        if (!isSteward(interaction.member)) {
+          pendingFinalizations.delete(interaction.user.id);
+          return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', ephemeral: true });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+        let finalText = interaction.fields.getTextInputValue('eindoordeel').trim();
+        pending.finalText = finalText;
+        pending.stage = 'preview';
+
+        let incidentData = pending.incidentSnapshot || activeIncidents.get(pending.messageId);
+        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+        if (!voteChannel) {
+          return interaction.editReply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
+        }
+        const voteMessage = voteChannel
+          ? await voteChannel.messages.fetch(pending.messageId).catch(() => null)
+          : null;
+        if (!incidentData && voteMessage) {
+          const recovered = hydrateIncidentFromMessage(voteMessage);
+          if (recovered) {
+            activeIncidents.set(pending.messageId, recovered);
+            incidentData = recovered;
+          }
+        }
+        if (!incidentData && pending.incidentNumber) {
+          const recoveredEntry = await recoverIncidentByNumber(pending.incidentNumber);
+          if (recoveredEntry) {
+            const [, recovered] = recoveredEntry;
+            incidentData = recovered;
+          }
+        }
+
+        const voteCount = incidentData?.votes ? Object.keys(incidentData.votes).length : 0;
+        const missingVotes = voteCount === 0 ? '⚠️ Waarschuwing: er zijn nog geen stemmen geregistreerd.' : null;
+        const tally = voteCount > 0 ? buildTallyText(incidentData.votes) : null;
+        const reporterTally = voteCount > 0 ? buildTallyText(incidentData.votes, 'reporter') : null;
+
+        const previewEmbed = new EmbedBuilder()
+          .setColor('#3498DB')
+          .setTitle('👀 Voorvertoning eindoordeel')
+          .setDescription(`**Eindoordeel**\n${finalText || '*Geen tekst*'}`)
+          .addFields(
+            { name: '🔢 Incidentnummer', value: incidentData?.incidentNumber || 'Onbekend', inline: true },
+            { name: '🏁 Divisie', value: incidentData?.division || 'Onbekend', inline: true },
+            { name: '🏁 Race', value: incidentData?.raceName || 'Onbekend', inline: true },
+            { name: '🔢 Ronde', value: incidentData?.round || 'Onbekend', inline: true },
+            { name: '👤 Ingediend door', value: incidentData?.reporter || 'Onbekend', inline: true },
+            { name: '⚠️ Rijder', value: incidentData?.guiltyDriver || 'Onbekend', inline: true },
+            { name: '📌 Reden', value: incidentData?.reason || 'Onbekend', inline: false }
+          )
+          .setFooter({ text: 'Controleer de opmaak. Bevestig om te publiceren.' });
+
+        if (tally) {
+          previewEmbed.addFields({ name: '📊 Stemresultaat (Dader)', value: `\`\`\`\n${tally}\n\`\`\`` });
+        }
+        if (reporterTally) {
+          previewEmbed.addFields({ name: '📊 Stemresultaat (Indiener)', value: `\`\`\`\n${reporterTally}\n\`\`\`` });
+        }
+
+        const previewRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('finalize_confirm').setLabel('✅ Bevestigen').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId('finalize_cancel').setLabel('✏️ Annuleren').setStyle(ButtonStyle.Secondary)
+        );
+
+        return interaction.editReply({
+          content: missingVotes ? `Voorvertoning van het eindoordeel:\n${missingVotes}` : 'Voorvertoning van het eindoordeel:',
+          embeds: [previewEmbed],
+          components: [previewRow]
+        });
+      }
+
+      if (interaction.isButton() && (interaction.customId === 'finalize_confirm' || interaction.customId === 'finalize_cancel')) {
+        const pending = pendingFinalizations.get(interaction.user.id);
+        if (!pending || pending.stage !== 'preview') {
+          return interaction.reply({ content: '❌ Geen open voorvertoning gevonden.', ephemeral: true });
+        }
+        if (Date.now() > pending.expiresAt) {
+          pendingFinalizations.delete(interaction.user.id);
+          return interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', ephemeral: true });
+        }
+        if (!isSteward(interaction.member)) {
+          pendingFinalizations.delete(interaction.user.id);
+          return interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', ephemeral: true });
+        }
+
+        if (interaction.customId === 'finalize_cancel') {
+          pendingFinalizations.delete(interaction.user.id);
+          return interaction.update({
+            content: '❎ Afhandeling geannuleerd. Start opnieuw om te bewerken.',
+            components: [],
+            embeds: [],
+            ephemeral: true
+          });
+        }
+
+        const finalText = String(pending.finalText || '').trim();
+        if (!finalText) {
+          pendingFinalizations.delete(interaction.user.id);
+          return interaction.reply({ content: '❌ Eindoordeel ontbreekt.', ephemeral: true });
+        }
+
+        await interaction.deferUpdate();
+        await interaction.editReply({ components: [] });
+        return finalizeWithText({ finalText, pending, interaction });
       }
     } catch (err) {
       console.error(err);
-      if (interaction.isRepliable()) {
-        try {
-          await interaction.reply({ content: '❌ Er ging iets mis. Check de bot logs.', ephemeral: true });
-        } catch {}
-      }
+      await respondToInteraction(interaction, {
+        content: '❌ Er ging iets mis. Check de bot logs.',
+        ephemeral: true
+      });
     }
   });
 }

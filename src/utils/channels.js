@@ -9,6 +9,10 @@ async function fetchTextTargetChannel(client, channelId) {
       await channel.setArchived(false).catch(() => null);
     }
 
+    if (channel.locked) {
+      await channel.setLocked(false).catch(() => null);
+    }
+
     if (channel.joinable) {
       await channel.join().catch(() => null);
     }
@@ -17,4 +21,15 @@ async function fetchTextTargetChannel(client, channelId) {
   return channel;
 }
 
-module.exports = { fetchTextTargetChannel };
+const canSendToChannel = (channel, member) => {
+  if (!channel || !member) return false;
+  if (!channel.permissionsFor) return false;
+  const permissions = channel.permissionsFor(member);
+  if (!permissions) return false;
+  if (channel.isThread && channel.isThread()) {
+    return permissions.has('ViewChannel') && permissions.has('SendMessagesInThreads');
+  }
+  return permissions.has('ViewChannel') && permissions.has('SendMessages');
+};
+
+module.exports = { fetchTextTargetChannel, canSendToChannel };
