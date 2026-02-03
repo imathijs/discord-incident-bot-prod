@@ -38,6 +38,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   const allowedGuildId = config.allowedGuildId;
   const stewardIncidentThreadId = '1466753742002065531';
   const stewardFinalizeChannelId = config.stewardFinalizeChannelId || config.voteChannelId;
+  const isFinalizeChannelOrThread = (channel) => {
+    if (!channel) return false;
+    if (channel.id === stewardFinalizeChannelId) return true;
+    if (channel.isThread?.() && channel.parentId === stewardFinalizeChannelId) return true;
+    return false;
+  };
 
   function isSteward(member) {
     return member.roles?.cache?.has(config.stewardRoleId);
@@ -875,9 +881,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         if (subcommand === 'afhandelen') {
-          if (interaction.channelId !== stewardFinalizeChannelId) {
+          if (!isFinalizeChannelOrThread(interaction.channel)) {
             return interaction.reply({
-              content: '❌ Afhandelen kan alleen in het ingestelde steward-kanaal.',
+              content: '❌ Afhandelen kan alleen in het ingestelde steward-kanaal of een thread daaronder.',
               flags: MessageFlags.Ephemeral
             });
           }

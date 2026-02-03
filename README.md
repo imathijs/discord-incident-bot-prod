@@ -24,7 +24,7 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 De meeste instellingen staan in `config.json`:
 - `reportChannelId` – kanaal waar de meldknop staat
 - `voteChannelId` – stewards forumkanaal met incident‑threads en stemmen
-- `stewardFinalizeChannelId` – kanaal-ID waar `/raceincident afhandelen` is toegestaan (valt terug op `voteChannelId`)
+- `stewardFinalizeChannelId` – kanaal-ID waar `/raceincident afhandelen` is toegestaan, inclusief alle threads daaronder (valt terug op `voteChannelId`)
 - `resolvedChannelId` – kanaal voor afgehandelde incidenten
 - `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
 - `stewardRoleId` – rol-ID voor stewards
