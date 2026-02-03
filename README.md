@@ -5,7 +5,7 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 ## Wat doet de bot?
 - Plaatst een meldknop in het meld‑kanaal.
 - Laat rijders een incident indienen via een begeleide flow (divisie → reden → schuldige → race/ronde/bocht → beschrijving).
-- Stuurt de melding door naar het stewards kanaal met stemknoppen.
+- Plaatst de melding als forum‑post in het stewards forumkanaal en maakt per incident een thread met stemknoppen.
 - Vraagt de melder om bewijs te uploaden (DM of kanaal).
 - Stuurt een DM naar de schuldige rijder om tijdens de behandeling éénmalig te reageren (binnen 2 dagen).
 - Laat stewards stemmen en het eindoordeel publiceren.
@@ -15,15 +15,15 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 ## Hoofdflow (kort)
 1) `raceincident melden` plaatst de meldknop in het meld‑kanaal.
 2) Melder kiest divisie + reden + schuldige, vult race/ronde/bocht/beschrijving in en bevestigt.
-3) Incident verschijnt in het stewards kanaal met stemknoppen.
-4) Melder uploadt bewijs via DM (of kanaal).
+3) Incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen.
+4) Bewijs (uploads/links) wordt aan de incident‑thread toegevoegd.
 5) Schuldige ontvangt DM en kan tijdens de behandeling één keer reageren (max 2 dagen).
 6) Steward sluit af met eindoordeel; bot plaatst dit in het resolved kanaal.
 
 ## Configuratie
 De meeste instellingen staan in `config.json`:
 - `reportChannelId` – kanaal waar de meldknop staat
-- `voteChannelId` – stewards kanaal met incidenten en stemmen
+- `voteChannelId` – stewards forumkanaal met incident‑threads en stemmen
 - `resolvedChannelId` – kanaal voor afgehandelde incidenten
 - `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
 - `stewardRoleId` – rol-ID voor stewards

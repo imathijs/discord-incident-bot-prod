@@ -85,7 +85,7 @@ function registerMessageHandlers(client, { config, state }) {
           return;
         }
 
-        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+        const voteChannel = await fetchTextTargetChannel(client, pendingEntry.threadId || config.voteChannelId);
         if (!voteChannel) {
           await message.reply('❌ Steward-kanaal niet gevonden. Probeer later opnieuw.');
           return;
@@ -202,7 +202,10 @@ function registerMessageHandlers(client, { config, state }) {
       return;
     }
 
-    const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+    const voteChannel = await fetchTextTargetChannel(
+      client,
+      pending.voteThreadId || config.voteChannelId
+    );
     if (!voteChannel) return;
 
     const voteMessage = await voteChannel.messages.fetch(pending.messageId).catch(() => null);

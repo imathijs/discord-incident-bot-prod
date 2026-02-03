@@ -64,6 +64,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   };
 
   const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
+  const extractIncidentNumberFromText = (value) => {
+    const match = String(value || '').match(/INC-\d+/i);
+    return match ? match[0].toUpperCase() : '';
+  };
   const normalizeTicketInput = (value) => {
     const normalized = normalizeIncidentNumber(value);
     if (!normalized) return '';
@@ -82,8 +86,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const fromField = getEmbedFieldValue(embed, '🔢 Incidentnummer');
     if (fromField) return fromField;
     const title = embed?.title || '';
-    const match = String(title).match(/INC-\d+/i);
-    return match ? match[0].toUpperCase() : '';
+    return extractIncidentNumberFromText(title);
   };
 
   const extractUserIdFromText = (value) => {
@@ -188,6 +191,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const guiltyValue = getEmbedFieldValue(embed, '⚠️ Schuldige rijder') || 'Onbekend';
     const reporterValue = getEmbedFieldValue(embed, '👤 Ingediend door') || 'Onbekend';
     const votes = parseVotesFromEmbed(embed);
+    const threadId = message?.channel?.isThread?.() ? message.channelId : null;
     return {
       votes,
       incidentNumber,
@@ -200,11 +204,57 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       reason: getEmbedFieldValue(embed, '📌 Reden') || 'Onbekend',
       reporter: reporterValue,
       reporterId: extractUserIdFromText(reporterValue),
-      sheetRowNumber: extractSheetRowNumber(embed)
+      sheetRowNumber: extractSheetRowNumber(embed),
+      threadId
     };
   };
 
-  const findIncidentMessageByNumber = async (voteChannel, normalizedTicket, maxMessages = 300) => {
+  const isVoteThreadChannel = (channel) =>
+    !!channel?.isThread?.() && channel.parentId === config.voteChannelId;
+
+  const buildIncidentThreadName = ({ incidentNumber, reporterTag, guiltyDriver }) => {
+    const reporter = reporterTag || 'Onbekend';
+    const guilty = guiltyDriver || 'Onbekend';
+    const base = `${incidentNumber} - ${reporter} vs ${guilty}`;
+    if (base.length <= 100) return base;
+    return `${base.slice(0, 97)}...`;
+  };
+
+  const findIncidentThreadByNumber = async (normalizedTicket) => {
+    const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+    if (!forumChannel?.threads?.fetchActive) return null;
+    const matchesTicket = (thread) => {
+      const threadIncident = extractIncidentNumberFromText(thread?.name || '');
+      return threadIncident === normalizedTicket || (thread?.name || '').toUpperCase().includes(normalizedTicket);
+    };
+
+    const active = await forumChannel.threads.fetchActive().catch(() => null);
+    if (active?.threads?.size) {
+      for (const thread of active.threads.values()) {
+        if (matchesTicket(thread)) return thread;
+      }
+    }
+
+    const archived = await forumChannel.threads.fetchArchived({ type: 'public', limit: 100 }).catch(() => null);
+    if (archived?.threads?.size) {
+      for (const thread of archived.threads.values()) {
+        if (matchesTicket(thread)) return thread;
+      }
+    }
+
+    return null;
+  };
+
+  const findIncidentMessageByNumber = async (normalizedTicket, maxMessages = 300) => {
+    const thread = await findIncidentThreadByNumber(normalizedTicket);
+    if (thread) {
+      const starter = await thread.fetchStarterMessage().catch(() => null);
+      if (starter) return { message: starter, threadId: thread.id };
+    }
+
+    const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+    if (!voteChannel?.messages?.fetch) return null;
+
     let remaining = Math.max(0, maxMessages);
     let before = undefined;
     while (remaining > 0) {
@@ -217,7 +267,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           (ticketFromEmbed && normalizeIncidentNumber(ticketFromEmbed) === normalizedTicket) ||
           normalizeIncidentNumber(message.content).includes(normalizedTicket) ||
           normalizeIncidentNumber(embed?.title).includes(normalizedTicket);
-        if (matches) return message;
+        if (matches) return { message, threadId: message.channelId };
       }
       remaining -= batch.size;
       before = batch.last().id;
@@ -226,14 +276,16 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   };
 
   const recoverIncidentByNumber = async (ticketNumber) => {
-    const normalizedTicket = normalizeIncidentNumber(ticketNumber);
-    const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
-    if (!voteChannel) return null;
-    const message = await findIncidentMessageByNumber(voteChannel, normalizedTicket);
-    if (!message) return null;
+    const normalizedTicket = normalizeTicketInput(ticketNumber);
+    const found = await findIncidentMessageByNumber(normalizedTicket);
+    if (!found?.message) return null;
+    const { message, threadId } = found;
     const incidentData = hydrateIncidentFromMessage(message);
     if (!incidentData) return null;
-    activeIncidents.set(message.id, incidentData);
+    activeIncidents.set(message.id, {
+      ...incidentData,
+      threadId: threadId || message.channelId
+    });
     return [message.id, incidentData];
   };
 
@@ -407,9 +459,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       });
     }
 
-    const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
-    if (!voteChannel) {
-      return interaction.editReply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
+    const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+    if (!forumChannel?.threads?.create) {
+      return interaction.editReply({
+        content: '❌ Stem-kanaal niet gevonden of is geen forum-kanaal. Check voteChannelId.'
+      });
     }
 
     const reasonValue = pending.reasonValue;
@@ -485,11 +539,39 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         .setDisabled(true)
     );
 
-    const message = await voteChannel.send({
-      content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${division} - ${raceName} (${round}) - Door ${pending.reporterTag}`,
-      embeds: [incidentEmbed],
-      components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
+    const threadName = buildIncidentThreadName({
+      incidentNumber,
+      reporterTag: pending.reporterTag,
+      guiltyDriver
     });
+    let thread;
+    try {
+      thread = await forumChannel.threads.create({
+        name: threadName,
+        message: {
+          content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${division} - ${raceName} (${round}) - Door ${pending.reporterTag}`,
+          embeds: [incidentEmbed],
+          components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
+        }
+      });
+    } catch (err) {
+      console.warn('⚠️ Forum thread aanmaken mislukt.', {
+        voteChannelId: config.voteChannelId,
+        threadName,
+        error: err?.message,
+        code: err?.code,
+        status: err?.status
+      });
+      throw err;
+    }
+    let message = await thread.fetchStarterMessage().catch(() => null);
+    if (!message) {
+      message = await thread.send({
+        content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${division} - ${raceName} (${round}) - Door ${pending.reporterTag}`,
+        embeds: [incidentEmbed],
+        components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
+      });
+    }
 
     const sheetRowNumber = await appendIncidentRow({
       config,
@@ -520,7 +602,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       reason: reasonLabel,
       reporter: pending.reporterTag,
       reporterId: pending.reporterId,
-      sheetRowNumber
+      sheetRowNumber,
+      threadId: thread.id
     });
 
     if (sheetRowNumber) {
@@ -556,6 +639,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             round,
             reporterTag: pending.reporterTag,
             messageId: message.id,
+            threadId: thread.id,
             channelId: guiltyDm.id,
             expiresAt: Date.now() + guiltyReplyWindowMs,
             responded: false
@@ -582,6 +666,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     pendingEvidence.set(interaction.user.id, {
       messageId: message.id,
+      voteThreadId: thread.id,
       channelId: evidenceChannelId,
       expiresAt: Date.now() + evidenceWindowMs,
       type: 'incident',
@@ -601,6 +686,46 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   client.once('clientReady', () => {
     const lockNote = allowedGuildId ? ` (locked to guild ${allowedGuildId})` : '';
     console.log(`✅ Bot is online als ${client.user.tag}${lockNote}`);
+  });
+
+  client.on('clientReady', async () => {
+    const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+    if (!forumChannel) {
+      console.warn('⚠️ Forum kanaal niet gevonden voor permissie-check.', { voteChannelId: config.voteChannelId });
+      return;
+    }
+    const botMember =
+      forumChannel.guild?.members?.me ||
+      (forumChannel.guild ? await forumChannel.guild.members.fetchMe().catch(() => null) : null);
+    if (!botMember) {
+      console.warn('⚠️ Kon bot-member niet ophalen voor permissie-check.', { voteChannelId: config.voteChannelId });
+      return;
+    }
+    const permissions = forumChannel.permissionsFor(botMember);
+    if (!permissions) {
+      console.warn('⚠️ Geen permissies gevonden voor bot op forum kanaal.', { voteChannelId: config.voteChannelId });
+      return;
+    }
+    const missing = [];
+    if (!permissions.has('ViewChannel')) missing.push('ViewChannel');
+    if (!permissions.has('SendMessages')) missing.push('SendMessages');
+    if (!permissions.has('SendMessagesInThreads')) missing.push('SendMessagesInThreads');
+    if (!permissions.has('CreatePublicThreads') && !permissions.has('CreatePrivateThreads')) {
+      missing.push('CreatePosts/Threads');
+    }
+    if (missing.length) {
+      console.warn('⚠️ Ontbrekende permissies op forum kanaal.', {
+        voteChannelId: config.voteChannelId,
+        missing,
+        channelType: forumChannel.type,
+        permissionFlags: permissions.toArray()
+      });
+    } else {
+      console.log('✅ Forum kanaal permissies OK.', {
+        voteChannelId: config.voteChannelId,
+        channelType: forumChannel.type
+      });
+    }
   });
 
   // Slash command registratie
@@ -752,7 +877,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         if (subcommand === 'afhandelen') {
-          if (interaction.channelId !== config.voteChannelId) {
+          if (interaction.channelId !== config.voteChannelId && !isVoteThreadChannel(interaction.channel)) {
             return interaction.reply({
               content: '❌ Afhandelen kan alleen in het stewards-kanaal.',
               flags: MessageFlags.Ephemeral
@@ -788,7 +913,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           const [messageId, incidentData] = matchEntry;
           pendingFinalizations.set(interaction.user.id, {
             messageId,
-            channelId: interaction.channelId,
+            channelId: incidentData?.threadId || interaction.channelId,
             expiresAt: Date.now() + finalizeWindowMs,
             incidentNumber: incidentData?.incidentNumber || normalizedTicket,
             incidentSnapshot: incidentData || null
@@ -870,7 +995,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
         removePendingGuiltyReply(incidentData.incidentNumber || ticketNumber);
 
-        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+        const voteChannel = await fetchTextTargetChannel(client, incidentData?.threadId || config.voteChannelId);
         if (!voteChannel) {
           return respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
         }
@@ -1332,7 +1457,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         const story = interaction.fields.getTextInputValue('verhaal');
         const evidenceLinks = interaction.fields.getTextInputValue('bewijs_links') || 'Geen bewijs geüpload';
 
-        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+        const incidentThread = await findIncidentThreadByNumber(normalizeTicketInput(incidentNumber));
+        const voteChannel = await fetchTextTargetChannel(
+          client,
+          incidentThread?.id || config.voteChannelId
+        );
         if (!voteChannel) {
           return interaction.reply({ content: '❌ Steward-kanaal niet gevonden! Check voteChannelId.', flags: MessageFlags.Ephemeral });
         }
@@ -1356,6 +1485,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (pending.dmChannelId) {
           pendingEvidence.set(interaction.user.id, {
             messageId: appealMessage.id,
+            voteThreadId: incidentThread?.id || null,
             channelId: pending.dmChannelId,
             expiresAt: Date.now() + evidenceWindowMs,
             type: 'appeal',
@@ -1508,7 +1638,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         if (!isVoteMessage) return;
 
         // Stemmen alleen in voteChannel
-        if (interaction.channelId !== config.voteChannelId) {
+        if (interaction.channelId !== config.voteChannelId && !isVoteThreadChannel(interaction.channel)) {
           return interaction.reply({ content: '❌ Stemmen kan alleen in het stem-kanaal.', flags: MessageFlags.Ephemeral });
         }
 
@@ -1761,7 +1891,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const finalizeWithText = async ({ finalText, pending, interaction }) => {
         const respond = (payload) =>
           interaction.replied || interaction.deferred ? interaction.followUp(payload) : interaction.reply(payload);
-        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+        const voteChannel = await fetchTextTargetChannel(client, pending.channelId || config.voteChannelId);
         if (!voteChannel) {
           return respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.', flags: MessageFlags.Ephemeral });
         }
@@ -1958,7 +2088,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         pending.stage = 'preview';
 
         let incidentData = pending.incidentSnapshot || activeIncidents.get(pending.messageId);
-        const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+        const voteChannel = await fetchTextTargetChannel(client, pending.channelId || config.voteChannelId);
         if (!voteChannel) {
           return interaction.editReply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
         }
@@ -2048,7 +2178,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return interaction.reply({ content: '❌ Eindoordeel ontbreekt.', flags: MessageFlags.Ephemeral });
         }
 
-        await interaction.deferUpdate();
+        if (!interaction.deferred && !interaction.replied) {
+          await interaction.deferUpdate();
+        }
         await interaction.editReply({ components: [] });
         return finalizeWithText({ finalText, pending, interaction });
       }

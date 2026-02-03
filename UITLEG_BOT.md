@@ -18,8 +18,8 @@ De bot verzorgt:
 4) Selecteer de schuldige rijder.
 5) Vul race‑nummer, ronde, bocht en beschrijving in.
 6) Controleer je melding en bevestig.
-7) Het incident verschijnt in het stewards kanaal met stemknoppen. De divisie wordt meegegeven.
-8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs wordt toegevoegd aan het incident.
+7) Het incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen. De divisie wordt meegegeven.
+8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs komt zichtbaar in de incident‑thread.
 9) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
 
 ## Infographic (Mermaid)
@@ -30,9 +30,10 @@ flowchart LR
   C --> D[Kies reden + schuldige]
   D --> E[Vul race/ronde/bocht/beschrijving]
   E --> F[Bevestig + upload bewijs (DM)]
-  F --> G[Stewards kanaal + divisie]
-  G --> H[Stemmen + eindoordeel + divisie]
-  H --> I[Resolved kanaal + divisie]
+  F --> G[Forum post + incident thread]
+  G --> H[Bewijs naar incident thread]
+  H --> I[Stemmen + eindoordeel + divisie]
+  I --> J[Resolved kanaal + divisie]
 ```
 
 ## Infographic (SVG)
