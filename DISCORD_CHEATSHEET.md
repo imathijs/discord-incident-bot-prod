@@ -40,7 +40,7 @@ Bestand: `config.json`
 Vul je IDs in:
 - `reportChannelId` – forum‑thread voor incidentmeldingen
 - `voteChannelId` – stewards kanaal of thread
-- `stewardFinalizeThreadId` – thread-ID waar `/raceincident afhandelen` is toegestaan (valt terug op `voteChannelId`)
+- `stewardFinalizeChannelId` – kanaal-ID waar `/raceincident afhandelen` is toegestaan (valt terug op `voteChannelId`)
 - `resolvedChannelId` – kanaal voor afgehandelde incidenten
 - `resolvedThreadId` – thread voor besluiten (optioneel)
 - `incidentChatChannelId` – kanaal voor @bot berichten
