@@ -37,6 +37,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   } = state;
   const allowedGuildId = config.allowedGuildId;
   const stewardIncidentThreadId = '1466753742002065531';
+  const stewardFinalizeThreadId = config.stewardFinalizeThreadId || config.voteChannelId;
 
   function isSteward(member) {
     return member.roles?.cache?.has(config.stewardRoleId);
@@ -414,6 +415,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
         { name: '🏁 Circuit', value: corner || 'Onbekend', inline: true },
         { name: '📝 Beschrijving', value: description || 'Onbekend', inline: false },
+        { name: '\u200b', value: '\u200b', inline: false },
         {
           name: 'ℹ️ Let op',
           value:
@@ -650,16 +652,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     let evidenceChannelId = interaction.channelId;
-    let evidenceLocation = 'dit kanaal';
     const botMessageIds = [];
     try {
       const dmChannel = await interaction.user.createDM();
       evidenceChannelId = dmChannel.id;
-      evidenceLocation = 'je DM';
       const dmIntro = await dmChannel.send(
-        '✅ Je incident is verzonden naar de stewards.\n' +
-          `Incidentnummer: **${incidentNumber}**\n` +
-          `Upload of stuur een link naar je bewijsmateriaal voor **${incidentNumber}** in dit kanaal binnen 5 minuten om het automatisch toe te voegen.`
+        `✅ Je incident-ticket **${incidentNumber}** is verzonden naar de stewards.\n` +
+          `Upload of stuur een link van je bewijsmateriaal in deze DM binnen 10 minuten om het automatisch toe te voegen aan je melding.`
       );
       botMessageIds.push(dmIntro.id);
     } catch {}
@@ -677,9 +676,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     pendingIncidentReports.delete(interaction.user.id);
     await interaction.editReply({
       content:
-        '✅ Je incident is verzonden naar de stewards!\n' +
-        `Incidentnummer: **${incidentNumber}**\n` +
-        `Upload of stuur een link naar je bewijsmateriaal voor **${incidentNumber}** in ${evidenceLocation} binnen 5 minuten om het automatisch toe te voegen.`
+        `✅ Je incident-ticket **${incidentNumber}** is verzonden naar de stewards!\n` +
+        `Je hebt zojuist een DM ontvangen van de Bot. Upload of deel je bewijsmateriaal via de DM.`
     });
   };
 
@@ -877,9 +875,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         if (subcommand === 'afhandelen') {
-          if (interaction.channelId !== config.voteChannelId && !isVoteThreadChannel(interaction.channel)) {
+          if (interaction.channelId !== stewardFinalizeThreadId) {
             return interaction.reply({
-              content: '❌ Afhandelen kan alleen in het stewards-kanaal.',
+              content: '❌ Afhandelen kan alleen in de ingestelde steward-thread.',
               flags: MessageFlags.Ephemeral
             });
           }
@@ -1501,7 +1499,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             const dmChannel = await interaction.user.createDM();
             const dmIntro = await dmChannel.send(
               '✅ Je wederwoord is doorgestuurd naar de stewards.\n' +
-                'Upload of stuur een link naar je bewijsmateriaal in dit kanaal binnen 5 minuten om het automatisch toe te voegen.'
+                'Upload of stuur een link naar je bewijsmateriaal in dit kanaal binnen 10 minuten om het automatisch toe te voegen.'
             );
             const current = pendingEvidence.get(interaction.user.id);
             if (current) {
@@ -1593,8 +1591,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             return interaction.reply({
               content:
                 pendingType === 'appeal'
-                  ? `✅ Je kunt extra beelden uploaden of links delen${incidentLabel} voor je wederwoord. Upload of stuur binnen 5 minuten.`
-                  : `✅ Je kunt extra beelden uploaden of links delen${incidentLabel}. Upload of stuur binnen 5 minuten.`,
+                  ? `✅ Je kunt extra beelden uploaden of links delen${incidentLabel} voor je wederwoord. Upload of stuur binnen 10 minuten.`
+                  : `✅ Je kunt extra beelden uploaden of links delen${incidentLabel}. Upload of stuur binnen 10 minuten.`,
               flags: MessageFlags.Ephemeral
             });
           }

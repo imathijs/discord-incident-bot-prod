@@ -22,6 +22,19 @@ De bot verzorgt:
 8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs komt zichtbaar in de incident‑thread.
 9) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
 
+## Configuratie
+De meeste instellingen staan in `config.json`:
+- `reportChannelId` – kanaal waar de meldknop staat
+- `voteChannelId` – stewards forumkanaal met incident‑threads en stemmen
+- `stewardFinalizeThreadId` – thread-ID waar `/raceincident afhandelen` is toegestaan (valt terug op `voteChannelId`)
+- `resolvedChannelId` – kanaal voor afgehandelde incidenten
+- `resolvedThreadId` – thread voor besluiten (optioneel)
+- `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
+- `stewardRoleId` – rol-ID voor stewards
+- `allowedGuildId` – server-ID waar de bot is toegestaan (laat leeg voor alle servers)
+- `incidentCounter` – teller voor incidentnummers (`INC-xxxxx`)
+- `autoDeleteHours` – auto‑delete van DM‑berichten/opties
+
 ## Infographic (Mermaid)
 ```mermaid
 flowchart LR

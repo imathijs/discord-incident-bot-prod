@@ -261,7 +261,13 @@ function registerMessageHandlers(client, { config, state }) {
     } catch (err) {
       console.error('Bewijs uploaden mislukt:', err);
     }
-    const confirmation = await message.reply('✅ Bewijsmateriaal toegevoegd aan de steward-melding.');
+    const incidentLabel =
+      pending.incidentNumber ||
+      activeIncidents.get(pending.messageId)?.incidentNumber ||
+      'Onbekend';
+    const confirmation = await message.reply(
+      `✅ Bewijsmateriaal toegevoegd aan incident-ticket ${incidentLabel}.`
+    );
     if (pending.promptMessageId) {
       const oldPrompt = await message.channel.messages.fetch(pending.promptMessageId).catch(() => null);
       if (oldPrompt?.deletable) await oldPrompt.delete().catch(() => {});

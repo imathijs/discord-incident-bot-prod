@@ -15,7 +15,8 @@ const evidenceButtonIds = {
   done: 'evidence_done'
 };
 
-const evidenceWindowMs = 5 * 60 * 1000;
+// wachttijd van bewijsmateriaal
+const evidenceWindowMs = 10 * 60 * 1000;
 const incidentReportWindowMs = 5 * 60 * 1000;
 const appealWindowMs = 5 * 60 * 1000;
 const finalizeWindowMs = 5 * 60 * 1000;
