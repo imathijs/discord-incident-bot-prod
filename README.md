@@ -20,6 +20,23 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 5) Schuldige ontvangt DM en kan tijdens de behandeling één keer reageren (max 2 dagen).
 6) Steward sluit af met eindoordeel; bot plaatst dit in het resolved kanaal.
 
+## How‑to (leden): incident terugnemen
+Gebruik dit alleen zolang het incident nog **niet** is afgehandeld.
+1) Voer het commando uit: `/raceincident neemterug ticketnummer:<INC-xxxxx>`.
+2) Alleen de indiener kan dit doen.
+3) Het incident wordt verwijderd uit de stem‑thread.
+4) In de incident‑thread verschijnt: “Incident is teruggetrokken door <naam indiener>”.
+5) Als het incident al is afgehandeld krijg je de melding dat terugnemen niet meer kan.
+
+## Stewards (beheer)
+### Incident terugnemen: wat gebeurt er?
+- Alleen de oorspronkelijke indiener mag een incident terugnemen.
+- Als het incident al is afgehandeld, wordt terugnemen geweigerd en verschijnt er een melding in de thread.
+- Als het incident nog open staat, wordt het stem‑bericht verwijderd (of op status “Teruggenomen” gezet als verwijderen niet kan).
+- Als het incident nog open staat, krijgt de thread een bericht dat het incident is teruggetrokken.
+- Als het incident nog open staat, verdwijnt het incident uit de actieve incidentenlijst.
+- Als het incident nog open staat, verschijnt in het resolved kanaal een korte melding + embed met samenvatting.
+
 ## Configuratie
 De meeste instellingen staan in `config.json`:
 - `reportChannelId` – kanaal waar de meldknop staat
