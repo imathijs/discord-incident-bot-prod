@@ -116,7 +116,8 @@ const sendGuiltyReplyToStewards = async ({
   message,
   pendingEntry,
   incidentKey,
-  voteChannel
+  voteChannel,
+  stewardRoleId
 }) => {
   const responseText = (message.content || '').trim();
   const attachmentLinks = [...message.attachments.values()].map((a) => a.url);
@@ -150,7 +151,7 @@ const sendGuiltyReplyToStewards = async ({
   }
 
   await voteChannel.send({
-    content: `<@&${config.stewardRoleId}> - Reactie tegenpartij ontvangen voor incident ${
+    content: `<@&${stewardRoleId}> - Reactie <@${message.author.id}> ontvangen voor incident ${
       pendingEntry.incidentNumber || incidentKey || 'Onbekend'
     }`,
     embeds: [responseEmbed]
@@ -223,7 +224,8 @@ function registerMessageHandlers(client, { config, state }) {
           message,
           pendingEntry,
           incidentKey,
-          voteChannel
+          voteChannel,
+          stewardRoleId: config.stewardRoleId
         });
         if (!sent) return;
 

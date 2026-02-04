@@ -474,8 +474,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     votesFieldName,
     logLabel
   }) => {
-    const tally = buildTallyText(incidentData.votes, tallyType);
-    const voteList = buildVoteBreakdown(incidentData.votes, tallyType);
+    const tallyPrefix = tallyType === 'reporter' ? 'reporter' : '';
+    const breakdownType = tallyType === 'reporter' ? 'reporter' : 'guilty';
+    const tally = buildTallyText(incidentData.votes, tallyPrefix);
+    const voteList = buildVoteBreakdown(incidentData.votes, breakdownType);
     const baseEmbed = interaction.message?.embeds?.[0];
     if (!baseEmbed) return false;
 
@@ -678,12 +680,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         const guiltyUser = await client.users.fetch(pending.guiltyId).catch(() => null);
         if (guiltyUser) {
           const guiltyDm = await guiltyUser.createDM();
+          const reporterMention = pending.reporterId
+            ? `<@${pending.reporterId}>`
+            : `**${pending.reporterTag || 'Onbekend'}**`;
           await guiltyDm.send(
             'Er is een race incident ingediend door ' +
-              `**${pending.reporterTag || 'Onbekend'}** met het incident nummer **${incidentNumber}**.\n` +
+              `${reporterMention} met het incident nummer **${incidentNumber}**.\n` +
               `Het gaat om Race ${raceName} * Ronde ${round}.\n` +
               'Je hebt 2 dagen de tijd om te reageren door middel van deze DM te gebruiken.\n' +
-              'DM mag maar 1x worden ingevuld en wordt toegevoegd als reactie van de tegenpartij in het stewards kanaal onder vermelding van het incident nummer.'
+              'De DM mag slechts één keer worden ingediend en wordt als tegenpartij als reactie geplaatst onder het incident-ticket.'
           );
 
           const normalizedIncident = incidentNumber.toUpperCase();
@@ -991,11 +996,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const reporterMention = incidentData.reporterId ? `<@${incidentData.reporterId}>` : incidentData.reporter;
 
     if (voteChannel?.isThread?.()) {
+      const stewardRoleId = config.incidentStewardRoleId || config.stewardRoleId;
+      const stewardMention = stewardRoleId ? `<@&${stewardRoleId}>` : '@Incident steward';
       await voteChannel
         .send({
           content: reporterMention
-            ? `🛑 Incident is teruggetrokken door ${reporterMention}.`
-            : '🛑 Incident is teruggetrokken door de indiener.'
+            ? `🛑 ${stewardMention} - Incident is teruggetrokken door ${reporterMention}.`
+            : `🛑 ${stewardMention} - Incident is teruggetrokken door de indiener.`
         })
         .catch(() => {});
     }

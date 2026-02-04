@@ -49,6 +49,7 @@ De meeste instellingen staan in `config.json`:
 - `withdrawNoticeChannelId` – kanaal/thread voor melding bij terugnemen (leeg = niet posten)
 - `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
 - `stewardRoleId` – rol-ID voor stewards
+- `incidentStewardRoleId` – rol-ID voor @Incident steward (bij teruggenomen incidenten)
 - `allowedGuildId` – server-ID waar de bot is toegestaan (laat leeg voor alle servers)
 - `incidentCounter` – teller voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – auto‑delete van DM‑berichten/opties
