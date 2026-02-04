@@ -46,11 +46,29 @@ De meeste instellingen staan in `config.json`:
 - `stewardFinalizeChannelId` – kanaal-ID waar `/raceincident afhandelen` is toegestaan, inclusief alle threads daaronder (valt terug op `voteChannelId`)
 - `resolvedChannelId` – kanaal voor afgehandelde incidenten
 - `resolvedThreadId` – thread voor besluiten (optioneel)
+- `withdrawNoticeChannelId` – kanaal/thread voor melding bij terugnemen (leeg = niet posten)
 - `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
 - `stewardRoleId` – rol-ID voor stewards
 - `allowedGuildId` – server-ID waar de bot is toegestaan (laat leeg voor alle servers)
 - `incidentCounter` – teller voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – auto‑delete van DM‑berichten/opties
+
+## Discord‑rechten (bot)
+Minimale rechten bij het uitnodigen van de bot (OAuth2):
+- View Channels
+- Send Messages
+- Send Messages in Threads
+- Create Public Threads
+- Read Message History
+- Embed Links
+- Attach Files
+- Use Slash Commands
+- Manage Threads (aanbevolen om archived threads te openen)
+
+Verder nodig:
+- **Message Content Intent** aanzetten in de Discord Developer Portal (nodig voor DM‑berichten).
+
+Details en setup: `DISCORD_CHEATSHEET.md`.
 
 ## Infographic (Mermaid)
 ```mermaid

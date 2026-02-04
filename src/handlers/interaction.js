@@ -1070,7 +1070,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             .catch(() => {});
         }
 
-        const resolvedChannel = await client.channels.fetch(config.resolvedChannelId).catch(() => null);
+        const withdrawNoticeTargetId = config.withdrawNoticeChannelId;
+        const resolvedChannel = withdrawNoticeTargetId
+          ? await client.channels.fetch(withdrawNoticeTargetId).catch(() => null)
+          : null;
         if (resolvedChannel) {
           const noticeEmbed = new EmbedBuilder()
             .setColor('#777777')
