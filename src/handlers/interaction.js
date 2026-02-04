@@ -219,6 +219,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   const isVoteThreadChannel = (channel) =>
     !!channel?.isThread?.() && channel.parentId === config.voteChannelId;
 
+  const threadHasResolution = async (channel) => {
+    if (!channel?.messages?.fetch) return false;
+    try {
+      const recent = await channel.messages.fetch({ limit: 50 });
+      for (const message of recent.values()) {
+        const embeds = message.embeds || [];
+        if (embeds.some((embed) => embed?.title === '✅ Steward Besluit')) return true;
+      }
+    } catch {}
+    return false;
+  };
+
   const buildIncidentThreadName = ({ incidentNumber, reporterTag, guiltyDriver }) => {
     const reporter = reporterTag || 'Onbekend';
     const guilty = guiltyDriver || 'Onbekend';
@@ -480,6 +492,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     const guiltyDriver = pending.guiltyTag || 'Onbekend';
     const guiltyMention = pending.guiltyId ? `<@${pending.guiltyId}>` : guiltyDriver;
+    const reporterMention = pending.reporterId ? `<@${pending.reporterId}>` : pending.reporterTag || 'Onbekend';
 
     const maxLabelNameLength = 24;
     const truncateLabelName = (value) => {
@@ -490,10 +503,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     const incidentEmbed = new EmbedBuilder()
       .setColor('#FF6B00')
-      .setTitle(`🚨 Incident ${incidentNumber} - ${raceName}`)
+      .setTitle(`🚨 Incident ${incidentNumber}`)
       .addFields(
-        { name: '🔢 Incidentnummer', value: incidentNumber, inline: true },
-        { name: '👤 Ingediend door', value: `${pending.reporterTag}`, inline: true },
+        { name: '👤 Ingediend door', value: reporterMention, inline: true },
         { name: '🏁 Divisie', value: division, inline: true },
         { name: '🏁 Race', value: raceName, inline: true },
         { name: '🔢 Ronde', value: round, inline: true },
@@ -557,7 +569,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       thread = await forumChannel.threads.create({
         name: threadName,
         message: {
-          content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${division} - ${raceName} (${round}) - Door ${pending.reporterTag}`,
+          content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld door ${pending.reporterTag}`,
           embeds: [incidentEmbed],
           components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
         }
@@ -1005,6 +1017,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         }
 
         const voteMessage = await voteChannel.messages.fetch(messageId).catch(() => null);
+        const isResolved = voteChannel?.isThread?.() ? await threadHasResolution(voteChannel) : false;
+        if (isResolved) {
+          if (voteChannel?.isThread?.()) {
+            await voteChannel
+              .send('❌ Incident kan niet meer worden teruggenomen; incident is afgehandeld.')
+              .catch(() => {});
+          }
+          return respond({
+            content: '❌ Kan niet meer worden teruggenomen, incident is afgehandeld.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
         let deleted = false;
         if (voteMessage?.deletable) {
           await voteMessage.delete().catch(() => {});
@@ -1034,9 +1058,20 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           } catch {}
         }
 
+        const reporterMention = incidentData.reporterId ? `<@${incidentData.reporterId}>` : incidentData.reporter;
+
+        if (voteChannel?.isThread?.()) {
+          await voteChannel
+            .send({
+              content: reporterMention
+                ? `🛑 Incident is teruggetrokken door ${reporterMention}.`
+                : '🛑 Incident is teruggetrokken door de indiener.'
+            })
+            .catch(() => {});
+        }
+
         const resolvedChannel = await client.channels.fetch(config.resolvedChannelId).catch(() => null);
         if (resolvedChannel) {
-          const reporterMention = incidentData.reporterId ? `<@${incidentData.reporterId}>` : incidentData.reporter;
           const noticeEmbed = new EmbedBuilder()
             .setColor('#777777')
             .setTitle(`🛑 Incident Teruggenomen - ${incidentData.incidentNumber || 'Onbekend'}`)
@@ -1987,8 +2022,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
               }
               const reportEmbed = new EmbedBuilder()
                 .setColor('#2ECC71')
-                .setTitle(`Incident Afgehandeld • ${incidentData.incidentNumber || 'Onbekend'}`)
-                .setDescription(`Uitslag van het stewardsoverleg.\n\n**Eindoordeel**\n${finalTextValue}`)
+                .setTitle(
+                  `Incident ${incidentData.incidentNumber || 'Onbekend'} - ` +
+                    `${incidentData.reporter || 'Onbekend'} vs ${incidentData.guiltyDriver || 'Onbekend'}`
+                )
+                .setDescription(`Status: AFGEHANDELD.\n\nUitslag van het stewardsoverleg.\n\n**Eindoordeel**\n${finalTextValue}`)
                 .addFields(
                   { name: '\u200b', value: '\u200b' },
                   {
