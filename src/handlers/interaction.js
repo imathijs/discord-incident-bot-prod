@@ -9,6 +9,7 @@ const {
   PermissionFlagsBits,
   MessageFlags,
   UserSelectMenuBuilder,
+  StringSelectMenuBuilder,
   ApplicationCommandOptionType
 } = require('discord.js');
 const {
@@ -34,10 +35,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     pendingIncidentReports,
     pendingAppeals,
     pendingFinalizations,
-    pendingGuiltyReplies
+    pendingGuiltyReplies,
+    pendingWithdrawals
   } = state;
   const allowedGuildId = config.allowedGuildId;
   const stewardIncidentThreadId = '1466753742002065531';
+  const withdrawButtonChannelId = '1469476056611422310';
   const stewardFinalizeChannelId = config.stewardFinalizeChannelId || config.voteChannelId;
   const isFinalizeChannelOrThread = (channel) => {
     if (!channel) return false;
@@ -159,6 +162,100 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     modal.addComponents(new ActionRowBuilder().addComponents(decisionInput));
     return modal;
   };
+
+  const buildWithdrawReasonModal = ({ reasonText } = {}) => {
+    const modal = new ModalBuilder()
+      .setCustomId(IDS.WITHDRAW_REASON_MODAL)
+      .setTitle('Incident intrekken');
+
+    const reasonInput = new TextInputBuilder()
+      .setCustomId('reden')
+      .setLabel('Reden (optioneel, maar gewenst)')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(false)
+      .setMaxLength(1000);
+    reasonInput.setPlaceholder('Waarom trek je het incident in?');
+    if (reasonText) reasonInput.setValue(reasonText);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+    return modal;
+  };
+
+  const buildWithdrawButtonMessage = () => {
+    const button = new ButtonBuilder()
+      .setCustomId(IDS.WITHDRAW_INCIDENT_BUTTON)
+      .setLabel('Incident intrekken')
+      .setStyle(ButtonStyle.Secondary);
+    const row = new ActionRowBuilder().addComponents(button);
+    const embed = new EmbedBuilder()
+      .setColor('#777777')
+      .setTitle('Incident intrekken')
+      .setDescription(
+        [
+          'Ben je van gedachten veranderd?',
+          'Via deze knop kan je je gemelde incident intrekken.',
+          'Geef bij voorkeur ook een reden op van het terugnemen.'
+        ].join('\n')
+      );
+    return { embeds: [embed], components: [row] };
+  };
+
+  const ensureWithdrawButtonMessage = async () => {
+    const channel = await client.channels.fetch(withdrawButtonChannelId).catch(() => null);
+    if (!channel?.isTextBased?.() || !channel?.messages?.fetch) return;
+    try {
+      const recent = await channel.messages.fetch({ limit: 50 });
+      const exists = recent.some((msg) =>
+        msg.components?.some((row) => row.components?.some((c) => c.customId === IDS.WITHDRAW_INCIDENT_BUTTON))
+      );
+      if (!exists) {
+        await channel.send(buildWithdrawButtonMessage());
+      }
+    } catch {}
+  };
+
+  const listOpenIncidentsForUser = async (user) => {
+    const items = [];
+    for (const [, incident] of activeIncidents.entries()) {
+      const isReporter =
+        (incident.reporterId && incident.reporterId === user.id) ||
+        (!incident.reporterId && incident.reporter && incident.reporter === user.tag);
+      if (!isReporter) continue;
+      items.push(incident);
+    }
+    if (items.length) return items;
+
+    const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+    if (!forumChannel?.threads?.fetchActive) return items;
+    const active = await forumChannel.threads.fetchActive().catch(() => null);
+    if (!active?.threads?.size) return items;
+
+    for (const thread of active.threads.values()) {
+      if (!thread?.isThread?.()) continue;
+      if (String(thread.name || '').startsWith('✅')) continue;
+      const starter = await thread.fetchStarterMessage().catch(() => null);
+      if (!starter) continue;
+      const recovered = hydrateIncidentFromMessage(starter);
+      if (!recovered) continue;
+      const isReporter =
+        (recovered.reporterId && recovered.reporterId === user.id) ||
+        (!recovered.reporterId && recovered.reporter && recovered.reporter === user.tag);
+      if (!isReporter) continue;
+      items.push(recovered);
+    }
+
+    return items;
+  };
+
+  const buildWithdrawSelectOptions = (incidents) =>
+    incidents.map((incident) => {
+      const baseLabel = `${incident.incidentNumber || 'Onbekend'} - ${incident.raceName || 'Onbekend'} (${incident.round || '?'})`;
+      const label = baseLabel.length > 100 ? `${baseLabel.slice(0, 97)}...` : baseLabel;
+      return {
+        label,
+        value: incident.incidentNumber || ''
+      };
+    });
 
   const parseVotesFromEmbed = (embed) => {
     const votes = {};
@@ -778,141 +875,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     });
   };
 
-  const handleSlashCommand = async (interaction) => {
-    if (!interaction.isChatInputCommand() || interaction.commandName !== 'raceincident') return false;
-
-    const subcommand = interaction.options.getSubcommand();
-    if (subcommand === 'melden') {
-      if (interaction.channelId !== config.reportChannelId) {
-        await interaction.reply({
-          content: '❌ Incident melden kan alleen in de ingestelde forum-thread.',
-          flags: MessageFlags.Ephemeral
-        });
-        return true;
-      }
-
-      const reportButton = new ButtonBuilder()
-        .setCustomId(IDS.REPORT_INCIDENT)
-        .setLabel('🚨 Meld Incident')
-        .setStyle(ButtonStyle.Danger);
-
-      const row = new ActionRowBuilder().addComponents(reportButton);
-
-      const embed = new EmbedBuilder()
-        .setColor('#FF0000')
-        .setTitle('DRE - Race Incident Meldingssysteem')
-        .setDescription(
-          [
-            'Wil je een incident melden bij de stewards van DRE?',
-            'Klik dan op de knop **Meld Incident**.',
-            '',
-            'Je doorloopt de stappen in dit kanaal.',
-            'Na het indienen ontvang je een DM om bewijsmateriaal te delen via een',
-            'YouTube-link of door het zelf te uploaden.',
-            '',
-            'De tegenpartij zal een DM ontvangen om zijn visie op het incident toe te lichten.',
-            '',
-            '⚠️ **Belangrijk**',
-            'Zonder bewijsmateriaal kunnen wij een incident niet beoordelen.',
-            'Zorg er daarom voor dat je bewijs beschikbaar hebt, zoals:',
-            '- een opname van het incident geplaatst op YouTube.',
-            '- losse opname van het incident. Je upload het bestand via discord.'
-          ].join('\n')
-        );
-
-      await interaction.reply({ embeds: [embed], components: [row] });
-      return true;
-    }
-
-    if (subcommand === 'stewardmelden') {
-      if (interaction.channelId !== stewardIncidentThreadId) {
-        await interaction.reply({
-          content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
-          flags: MessageFlags.Ephemeral
-        });
-        return true;
-      }
-
-      if (!isSteward(interaction.member)) {
-        await interaction.reply({
-          content: '❌ Alleen stewards kunnen namens een gebruiker melden.',
-          flags: MessageFlags.Ephemeral
-        });
-        return true;
-      }
-
-      const reportButton = new ButtonBuilder()
-        .setCustomId(IDS.STEWARD_REPORT_INCIDENT)
-        .setLabel('🧾 Melding indienen')
-        .setStyle(ButtonStyle.Primary);
-
-      const row = new ActionRowBuilder().addComponents(reportButton);
-
-      const embed = new EmbedBuilder()
-        .setColor('#F39C12')
-        .setTitle('Steward incident melding')
-        .setDescription('Je kan hier als steward een melding indienen.');
-
-      await interaction.reply({ embeds: [embed], components: [row] });
-      return true;
-    }
-
-    if (subcommand === 'afhandelen') {
-      if (!isFinalizeChannelOrThread(interaction.channel)) {
-        await interaction.reply({
-          content: '❌ Afhandelen kan alleen in het ingestelde steward-kanaal of een thread daaronder.',
-          flags: MessageFlags.Ephemeral
-        });
-        return true;
-      }
-
-      if (!isSteward(interaction.member)) {
-        await interaction.reply({ content: '❌ Alleen stewards kunnen afhandelen!', flags: MessageFlags.Ephemeral });
-        return true;
-      }
-
-      const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
-      const normalizedTicket = normalizeTicketInput(ticketNumber);
-      let matchEntry = null;
-      for (const entry of activeIncidents.entries()) {
-        const incidentNumber = entry[1]?.incidentNumber || '';
-        if (incidentNumber.toUpperCase() === normalizedTicket) {
-          matchEntry = entry;
-          break;
-        }
-      }
-
-      if (!matchEntry) {
-        matchEntry = await recoverIncidentByNumber(ticketNumber);
-      }
-
-      if (!matchEntry) {
-        await interaction.reply({
-          content: '❌ Incident niet gevonden of al afgehandeld.',
-          flags: MessageFlags.Ephemeral
-        });
-        return true;
-      }
-
-      const [messageId, incidentData] = matchEntry;
-      pendingFinalizations.set(interaction.user.id, {
-        messageId,
-        channelId: incidentData?.threadId || interaction.channelId,
-        expiresAt: Date.now() + finalizeWindowMs,
-        incidentNumber: incidentData?.incidentNumber || normalizedTicket,
-        incidentSnapshot: incidentData || null
-      });
-
-      await interaction.showModal(buildFinalizeModal());
-      return true;
-    }
-
-    if (subcommand !== 'neemterug') {
-      await interaction.reply({ content: '❌ Onbekende subcommand.', flags: MessageFlags.Ephemeral });
-      return true;
-    }
-
-    const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
+  const withdrawIncidentByNumber = async ({ interaction, ticketNumber, reasonText }) => {
     const normalizedTicket = normalizeTicketInput(ticketNumber);
     let matchEntry = null;
     for (const entry of activeIncidents.entries()) {
@@ -1001,7 +964,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         : new EmbedBuilder().setTitle(`🚨 Incident ${incidentData.incidentNumber || 'Onbekend'}`);
       const fields = baseEmbed.data.fields ?? [];
       const statusIndex = fields.findIndex((f) => f.name === '🛑 Status');
-      const statusField = { name: '🛑 Status', value: `Teruggenomen door ${interaction.user.tag}` };
+      const statusValue = reasonText
+        ? `Teruggenomen door ${interaction.user.tag}\nReden: ${reasonText}`
+        : `Teruggenomen door ${interaction.user.tag}`;
+      const statusField = { name: '🛑 Status', value: statusValue };
       if (statusIndex >= 0) {
         fields[statusIndex] = statusField;
       } else {
@@ -1019,6 +985,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     const reporterMention = incidentData.reporterId ? `<@${incidentData.reporterId}>` : incidentData.reporter;
+    const reasonLine = reasonText ? `\nReden: ${reasonText}` : '';
 
     if (voteChannel?.isThread?.()) {
       const stewardRoleId = config.incidentStewardRoleId || config.stewardRoleId;
@@ -1026,8 +993,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       await voteChannel
         .send({
           content: reporterMention
-            ? `🛑 ${stewardMention} - Incident is teruggetrokken door ${reporterMention}.`
-            : `🛑 ${stewardMention} - Incident is teruggetrokken door de indiener.`
+            ? `🛑 ${stewardMention} - Incident is teruggetrokken door ${reporterMention}.${reasonLine}`
+            : `🛑 ${stewardMention} - Incident is teruggetrokken door de indiener.${reasonLine}`
         })
         .catch(() => {});
     }
@@ -1040,7 +1007,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const noticeEmbed = new EmbedBuilder()
         .setColor('#777777')
         .setTitle(`🛑 Incident Teruggenomen - ${incidentData.incidentNumber || 'Onbekend'}`)
-        .setDescription(`Incident is door de melder teruggenomen (${reporterMention || 'Onbekend'}).`)
+        .setDescription(
+          `Incident is door de melder teruggenomen (${reporterMention || 'Onbekend'}).` +
+            (reasonText ? `\nReden: ${reasonText}` : '')
+        )
         .addFields(
           { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
           { name: '🏁 Divisie', value: incidentData.division || 'Onbekend', inline: true },
@@ -1066,8 +1036,191 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return true;
   };
 
+  const handleSlashCommand = async (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'raceincident') return false;
+
+    const subcommand = interaction.options.getSubcommand();
+    if (subcommand === 'melden') {
+      if (interaction.channelId !== config.reportChannelId) {
+        await interaction.reply({
+          content: '❌ Incident melden kan alleen in de ingestelde forum-thread.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      const reportButton = new ButtonBuilder()
+        .setCustomId(IDS.REPORT_INCIDENT)
+        .setLabel('🚨 Meld Incident')
+        .setStyle(ButtonStyle.Danger);
+
+      const row = new ActionRowBuilder().addComponents(reportButton);
+
+      const embed = new EmbedBuilder()
+        .setColor('#FF0000')
+        .setTitle('DRE - Race Incident Meldingssysteem')
+        .setDescription(
+          [
+            'Wil je een incident melden bij de stewards van DRE?',
+            'Klik dan op de knop **Meld Incident**.',
+            '',
+            'Je doorloopt de stappen in dit kanaal.',
+            'Na het indienen ontvang je een DM om bewijsmateriaal te delen via een',
+            'YouTube-link of door het zelf te uploaden.',
+            '',
+            'De tegenpartij zal een DM ontvangen om zijn visie op het incident toe te lichten.',
+            '',
+            '⚠️ **Belangrijk**',
+            'Zonder bewijsmateriaal kunnen wij een incident niet beoordelen.',
+            'Zorg er daarom voor dat je bewijs beschikbaar hebt, zoals:',
+            '- een opname van het incident geplaatst op YouTube.',
+            '- losse opname van het incident. Je upload het bestand via discord.'
+          ].join('\n')
+        );
+
+      await interaction.reply({ embeds: [embed], components: [row] });
+      return true;
+    }
+
+    if (subcommand === 'stewardmelden') {
+      if (interaction.channelId !== stewardIncidentThreadId) {
+        await interaction.reply({
+          content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      if (!isSteward(interaction.member)) {
+        await interaction.reply({
+          content: '❌ Alleen stewards kunnen namens een gebruiker melden.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      const reportButton = new ButtonBuilder()
+        .setCustomId(IDS.STEWARD_REPORT_INCIDENT)
+        .setLabel('🧾 Melding indienen')
+        .setStyle(ButtonStyle.Primary);
+
+      const row = new ActionRowBuilder().addComponents(reportButton);
+
+      const embed = new EmbedBuilder()
+        .setColor('#F39C12')
+        .setTitle('Steward incident melding')
+        .setDescription('Je kan hier als steward een melding indienen.');
+
+      await interaction.reply({ embeds: [embed], components: [row] });
+      return true;
+    }
+
+    if (subcommand === 'intrekkenknop') {
+      const targetChannel = await client.channels.fetch(withdrawButtonChannelId).catch(() => null);
+      if (!targetChannel?.isTextBased?.()) {
+        await interaction.reply({
+          content: '❌ Doel-kanaal voor intrekken-knop niet gevonden.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+      await targetChannel.send(buildWithdrawButtonMessage()).catch(() => null);
+      await interaction.reply({
+        content: `✅ Intrekken-knop geplaatst in <#${withdrawButtonChannelId}>.`,
+        flags: MessageFlags.Ephemeral
+      });
+      return true;
+    }
+
+    if (subcommand === 'afhandelen') {
+      if (!isFinalizeChannelOrThread(interaction.channel)) {
+        await interaction.reply({
+          content: '❌ Afhandelen kan alleen in het ingestelde steward-kanaal of een thread daaronder.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      if (!isSteward(interaction.member)) {
+        await interaction.reply({ content: '❌ Alleen stewards kunnen afhandelen!', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
+      const normalizedTicket = normalizeTicketInput(ticketNumber);
+      let matchEntry = null;
+      for (const entry of activeIncidents.entries()) {
+        const incidentNumber = entry[1]?.incidentNumber || '';
+        if (incidentNumber.toUpperCase() === normalizedTicket) {
+          matchEntry = entry;
+          break;
+        }
+      }
+
+      if (!matchEntry) {
+        matchEntry = await recoverIncidentByNumber(ticketNumber);
+      }
+
+      if (!matchEntry) {
+        await interaction.reply({
+          content: '❌ Incident niet gevonden of al afgehandeld.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      const [messageId, incidentData] = matchEntry;
+      pendingFinalizations.set(interaction.user.id, {
+        messageId,
+        channelId: incidentData?.threadId || interaction.channelId,
+        expiresAt: Date.now() + finalizeWindowMs,
+        incidentNumber: incidentData?.incidentNumber || normalizedTicket,
+        incidentSnapshot: incidentData || null
+      });
+
+      await interaction.showModal(buildFinalizeModal());
+      return true;
+    }
+
+    if (subcommand !== 'neemterug') {
+      await interaction.reply({ content: '❌ Onbekende subcommand.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
+    return withdrawIncidentByNumber({ interaction, ticketNumber, reasonText: '' });
+  };
+
   const handleSelectMenu = async (interaction) => {
     if (!interaction.isUserSelectMenu() && !interaction.isStringSelectMenu()) return false;
+
+    if (interaction.isStringSelectMenu() && interaction.customId === IDS.WITHDRAW_SELECT) {
+      const incidentNumber = String(interaction.values?.[0] || '').trim();
+      if (!incidentNumber) {
+        await interaction.reply({ content: '❌ Geen incident geselecteerd.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const incidents = await listOpenIncidentsForUser(interaction.user);
+      const match = incidents.find(
+        (incident) => (incident.incidentNumber || '').toUpperCase() === incidentNumber.toUpperCase()
+      );
+      if (!match) {
+        await interaction.reply({
+          content: '❌ Dit incident is niet (meer) beschikbaar om in te trekken.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      pendingWithdrawals.set(interaction.user.id, {
+        incidentNumber: match.incidentNumber,
+        expiresAt: Date.now() + 10 * 60 * 1000
+      });
+
+      await interaction.showModal(buildWithdrawReasonModal());
+      return true;
+    }
 
     // 2c-steward) Reporter kiezen: daarna schuldige kiezen
     if (interaction.isUserSelectMenu() && interaction.customId === IDS.STEWARD_REPORTER_SELECT) {
@@ -1331,6 +1484,27 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         flags: MessageFlags.Ephemeral
       });
       return true;
+    }
+
+    if (interaction.customId === IDS.WITHDRAW_REASON_MODAL) {
+      const pending = pendingWithdrawals.get(interaction.user.id);
+      if (!pending) {
+        await interaction.reply({ content: '❌ Geen open intrek-actie gevonden.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (Date.now() > pending.expiresAt) {
+        pendingWithdrawals.delete(interaction.user.id);
+        await interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const reasonText = String(interaction.fields.getTextInputValue('reden') || '').trim();
+      pendingWithdrawals.delete(interaction.user.id);
+      return withdrawIncidentByNumber({
+        interaction,
+        ticketNumber: pending.incidentNumber,
+        reasonText
+      });
     }
 
     // 6) Finalize modal submit: voorvertoning tonen
@@ -1695,6 +1869,47 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       await interaction.reply({
         content: 'Welke divisie?',
         components: [divisionRow],
+        flags: MessageFlags.Ephemeral
+      });
+      return true;
+    }
+
+    if (id === IDS.WITHDRAW_INCIDENT_BUTTON) {
+      if (interaction.channelId !== withdrawButtonChannelId) {
+        await interaction.reply({
+          content: '❌ Incident intrekken kan alleen via het intrekken-kanaal.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      const incidents = await listOpenIncidentsForUser(interaction.user);
+      if (!incidents.length) {
+        await interaction.reply({
+          content: '❌ Geen open incidenten gevonden op jouw naam.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      const limited = incidents.slice(0, 25);
+      const options = buildWithdrawSelectOptions(limited);
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(IDS.WITHDRAW_SELECT)
+        .setPlaceholder('Kies een incident om in te trekken')
+        .setMinValues(1)
+        .setMaxValues(1)
+        .addOptions(options);
+
+      const row = new ActionRowBuilder().addComponents(select);
+      const extraNote =
+        incidents.length > 25
+          ? '\nJe hebt meer dan 25 open incidenten. Gebruik /raceincident neemterug <ticketnummer> voor overige.'
+          : '';
+
+      await interaction.reply({
+        content: `Welke incident wil je intrekken?${extraNote}`,
+        components: [row],
         flags: MessageFlags.Ephemeral
       });
       return true;
@@ -2360,6 +2575,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
   });
 
+  client.on('clientReady', async () => {
+    await ensureWithdrawButtonMessage();
+  });
+
   // Slash command registratie
   client.on('clientReady', async () => {
     const commands = [
@@ -2377,6 +2596,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             type: ApplicationCommandOptionType.Subcommand,
             name: 'stewardmelden',
             description: 'Start incidentmelding namens een gebruiker (alleen steward-thread)'
+          },
+          {
+            type: ApplicationCommandOptionType.Subcommand,
+            name: 'intrekkenknop',
+            description: 'Plaats een knop om incidenten in te trekken'
           },
           {
             type: ApplicationCommandOptionType.Subcommand,
