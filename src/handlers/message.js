@@ -124,29 +124,6 @@ const findIncidentMessageByNumber = async (client, config, normalizedTicket, max
   return null;
 };
 
-const hasPriorGuiltyReply = async (channel, incidentNumber, userId) => {
-  if (!channel?.messages?.fetch) return false;
-  const normalized = normalizeTicketInput(incidentNumber);
-  try {
-    const recent = await channel.messages.fetch({ limit: 100 });
-    for (const msg of recent.values()) {
-      const content = normalizeIncidentNumber(msg.content);
-      if (content.includes(normalized) && msg.content.includes(`<@${userId}>`) && msg.content.includes('Reactie')) {
-        return true;
-      }
-      const embed = msg.embeds?.[0];
-      if (!embed) continue;
-      const title = String(embed.title || '').toUpperCase();
-      const ticket = normalizeIncidentNumber(extractIncidentNumberFromEmbed(embed));
-      const against = getEmbedFieldValue(embed, '👤 Tegenpartij');
-      if (ticket === normalized && title.includes('REACTIE TEGENPARTIJ') && against.includes('#')) {
-        if (msg.content.includes(`<@${userId}>`)) return true;
-      }
-    }
-  } catch {}
-  return false;
-};
-
 const updateEvidenceEmbed = async ({ voteMessage, evidenceText, authorId }) => {
   const embed = EmbedBuilder.from(voteMessage.embeds[0]);
   const fields = embed.data.fields ?? [];
@@ -187,8 +164,8 @@ const sendEvidenceFiles = async ({ message, pendingType, pending, incidentData, 
   await voteChannel.send({
     content:
       pendingType === 'appeal'
-        ? `📎 Bewijsmateriaal wederwoord van ${message.author.tag} - ${raceLabel}`
-        : `📎 Bewijsmateriaal van ${message.author.tag} - ${raceLabel}`,
+        ? `📎 Bewijsmateriaal wederwoord van ${message.author.tag}`
+        : `📎 Bewijsmateriaal van ${message.author.tag}`,
     files
   });
 };
@@ -226,13 +203,6 @@ const resolvePendingGuiltyEntry = async ({ message, pendingByUser, pendingGuilty
     return null;
   }
 
-  if (pendingEntry.responded) {
-    await message.reply(
-      `✅ Je reactie voor incident **${pendingEntry.incidentNumber || incidentKey}** is al ontvangen.`
-    );
-    return null;
-  }
-
   return { incidentKey, pendingEntry };
 };
 
@@ -241,20 +211,32 @@ const sendGuiltyReplyToStewards = async ({
   pendingEntry,
   incidentKey,
   voteChannel,
-  stewardRoleId
+  stewardRoleId,
+  incidentData
 }) => {
   const responseText = (message.content || '').trim();
+  const sanitizedResponseText = responseText.replace(/INC-\d+/gi, '').replace(/\s{2,}/g, ' ').trim();
   const attachmentLinks = [...message.attachments.values()].map((a) => a.url);
-  if (!responseText && attachmentLinks.length === 0) {
+  if (!sanitizedResponseText && attachmentLinks.length === 0) {
     await message.reply('❌ Stuur een reactie of voeg een bijlage toe.');
     return false;
   }
 
+  const authorId = message.author.id;
+  const isReporter = incidentData?.reporterId && incidentData.reporterId === authorId;
+  const isGuilty = incidentData?.guiltyId && incidentData.guiltyId === authorId;
+  const responseColor = isReporter ? '#2ECC71' : isGuilty ? '#E67E22' : '#F1C40F';
+  const responseRoleLabel = isReporter ? 'Indiener' : isGuilty ? 'Tegenpartij' : 'Onbekend';
+
   const responseEmbed = new EmbedBuilder()
-    .setColor('#F1C40F')
-    .setTitle(`🗣️ Reactie tegenpartij - ${pendingEntry.incidentNumber || incidentKey || 'Onbekend'}`)
+    .setColor(responseColor)
+    .setTitle(
+      `🗣️ Reactie (${responseRoleLabel}) ${message.author.tag} - ${
+        pendingEntry.incidentNumber || incidentKey || 'Onbekend'
+      }`
+    )
     .setDescription(
-      [responseText || '*Geen tekst meegeleverd.*', ...attachmentLinks].filter(Boolean).join('\n')
+      [sanitizedResponseText || '*Geen tekst meegeleverd.*', ...attachmentLinks].filter(Boolean).join('\n')
     )
     .setTimestamp();
 
@@ -269,11 +251,6 @@ const sendGuiltyReplyToStewards = async ({
 };
 
 const finalizeGuiltyReply = async ({ message, pendingByUser, pendingGuiltyReplies, incidentKey, pendingEntry }) => {
-  pendingEntry.responded = true;
-  pendingEntry.respondedAt = Date.now();
-  pendingByUser.set(incidentKey, pendingEntry);
-  pendingGuiltyReplies.set(message.author.id, pendingByUser);
-
   await message.reply(
     `✅ Je reactie is doorgestuurd naar de stewards voor incident **${
       pendingEntry.incidentNumber || incidentKey || 'Onbekend'
@@ -421,11 +398,6 @@ function registerMessageHandlers(client, { config, state }) {
         return;
       }
 
-      if (await hasPriorGuiltyReply(voteChannel, normalizedTicket, message.author.id)) {
-        await message.reply(`✅ Je reactie voor incident **${normalizedTicket}** is al ontvangen.`);
-        return;
-      }
-
       const pendingEntry = {
         incidentNumber: incidentData.incidentNumber || normalizedTicket,
         raceName: incidentData.raceName,
@@ -434,8 +406,7 @@ function registerMessageHandlers(client, { config, state }) {
         messageId: found.message.id,
         threadId: found.threadId,
         channelId: message.channelId,
-        expiresAt: createdAt ? createdAt + guiltyReplyWindowMs : Date.now() + guiltyReplyWindowMs,
-        responded: false
+        expiresAt: createdAt ? createdAt + guiltyReplyWindowMs : Date.now() + guiltyReplyWindowMs
       };
 
       const sent = await sendGuiltyReplyToStewards({
@@ -443,7 +414,8 @@ function registerMessageHandlers(client, { config, state }) {
         pendingEntry,
         incidentKey: normalizedTicket,
         voteChannel,
-        stewardRoleId: config.stewardRoleId
+        stewardRoleId: config.stewardRoleId,
+        incidentData
       });
       if (!sent) return;
 

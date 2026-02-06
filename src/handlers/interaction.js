@@ -102,6 +102,16 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return match ? match[1] : null;
   };
 
+  const formatUserLabel = async (value, guild) => {
+    const raw = String(value || '').trim();
+    const userId = extractUserIdFromText(raw);
+    if (!userId) return raw || 'Onbekend';
+    if (!guild) return `User ${userId}`;
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member?.user) return `User ${userId}`;
+    return member.user.tag || member.displayName || `User ${userId}`;
+  };
+
   const parseVoteLines = (text) => {
     const lines = String(text || '')
       .split('\n')
@@ -128,6 +138,26 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       votes.set(userId, entry);
     }
     return votes;
+  };
+
+  const buildFinalizeModal = ({ finalText } = {}) => {
+    const modal = new ModalBuilder()
+      .setCustomId(IDS.FINALIZE_MODAL)
+      .setTitle('Eindoordeel toevoegen');
+
+    const decisionInput = new TextInputBuilder()
+      .setCustomId('eindoordeel')
+      .setLabel('Eindoordeel (Markdown toegestaan)')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(4000);
+    decisionInput.setPlaceholder('Voorbeeld:\n**Besluit:**\n- CAT1, 1 strafpunt\n- Motivatie: ...');
+    if (finalText) {
+      decisionInput.setValue(finalText);
+    }
+
+    modal.addComponents(new ActionRowBuilder().addComponents(decisionInput));
+    return modal;
   };
 
   const parseVotesFromEmbed = (embed) => {
@@ -232,10 +262,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return false;
   };
 
-  const buildIncidentThreadName = ({ incidentNumber, reporterTag, guiltyDriver }) => {
+  const buildIncidentThreadName = ({ incidentNumber, reporterTag, guiltyDriver, status = 'open' }) => {
+    const statusPrefix = status === 'resolved' ? '✅' : '⚠️';
     const reporter = reporterTag || 'Onbekend';
     const guilty = guiltyDriver || 'Onbekend';
-    const base = `${incidentNumber} - ${reporter} vs ${guilty}`;
+    const base = `${statusPrefix} ${incidentNumber} - ${reporter} vs ${guilty}`;
     if (base.length <= 100) return base;
     return `${base.slice(0, 97)}...`;
   };
@@ -630,6 +661,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       });
     }
 
+    const finalizeButtons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary)
+    );
+    await thread.send({
+      content: 'Stewards: gebruik deze knop om het incident af te ronden.',
+      components: [finalizeButtons]
+    });
+
     const sheetRowNumber = await appendIncidentRow({
       config,
       row: [
@@ -864,21 +903,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         incidentSnapshot: incidentData || null
       });
 
-      const modal = new ModalBuilder()
-        .setCustomId(IDS.FINALIZE_MODAL)
-        .setTitle('Eindoordeel toevoegen');
-
-      const decisionInput = new TextInputBuilder()
-        .setCustomId('eindoordeel')
-        .setLabel('Eindoordeel (Markdown toegestaan)')
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true)
-        .setMaxLength(4000);
-      decisionInput.setPlaceholder('Voorbeeld:\n**Besluit:**\n- CAT1, 1 strafpunt\n- Motivatie: ...');
-
-      modal.addComponents(new ActionRowBuilder().addComponents(decisionInput));
-
-      await interaction.showModal(modal);
+      await interaction.showModal(buildFinalizeModal());
       return true;
     }
 
@@ -1385,7 +1410,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       const previewRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(IDS.FINALIZE_CONFIRM).setLabel('✅ Bevestigen').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(IDS.FINALIZE_CANCEL).setLabel('✏️ Annuleren').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(IDS.FINALIZE_EDIT).setLabel('✏️ Bewerken').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(IDS.FINALIZE_CANCEL).setLabel('❌ Annuleren').setStyle(ButtonStyle.Secondary)
       );
 
       await interaction.editReply({
@@ -1438,18 +1464,20 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     let finalTextValue = finalText;
     if (decision === 'CAT0') finalTextValue = 'No futher action';
 
+    const threadReporterLabel = await formatUserLabel(incidentData.reporter, voteChannel.guild);
+    const threadGuiltyLabel = await formatUserLabel(incidentData.guiltyDriver, voteChannel.guild);
     const resultEmbed = new EmbedBuilder()
       .setColor('#00FF00')
       .setTitle('✅ Steward Besluit')
       .setDescription(
-        `👤 Ingediend door: ${incidentData.reporter || 'Onbekend'}\n\n` +
+        `👤 Ingediend door: ${threadReporterLabel || 'Onbekend'}\n\n` +
           `**Eindoordeel**\n${finalTextValue}`
       )
       .addFields(
         { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
         { name: '🏁 Divisie', value: incidentData.division || 'Onbekend', inline: true },
         { name: '🏁 Race', value: incidentData.raceName, inline: true },
-        { name: '⚠️ Rijder', value: incidentData.guiltyDriver, inline: true },
+        { name: '⚠️ Rijder', value: threadGuiltyLabel || 'Onbekend', inline: true },
         { name: '📊 Stemresultaat (Dader)', value: `\`\`\`\n${tally}\n\`\`\`` },
         { name: '⚖️ Eindoordeel (Dader)', value: `**${decision}**`, inline: true },
         { name: '🎯 Strafpunten (Dader)', value: `**${penaltyPoints}**`, inline: true },
@@ -1492,11 +1520,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             });
             return;
           }
+          const reporterLabel = await formatUserLabel(incidentData.reporter, resolvedChannel.guild);
+          const guiltyLabel = await formatUserLabel(incidentData.guiltyDriver, resolvedChannel.guild);
           const reportEmbed = new EmbedBuilder()
             .setColor('#2ECC71')
             .setTitle(
               `Incident ${incidentData.incidentNumber || 'Onbekend'} - ` +
-                `${incidentData.reporter || 'Onbekend'} vs ${incidentData.guiltyDriver || 'Onbekend'}`
+                `${reporterLabel || 'Onbekend'} vs ${guiltyLabel || 'Onbekend'}`
             )
             .setDescription(`Status: AFGEHANDELD.\n\nUitslag van het stewardsoverleg.\n\n**Eindoordeel**\n${finalTextValue}`)
             .addFields(
@@ -1521,6 +1551,39 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             )
             .setTimestamp();
           await resolvedChannel.send({ embeds: [reportEmbed] });
+
+          // Update thread name to resolved status (best effort).
+          if (voteChannel.isThread?.()) {
+            try {
+              const threadReporterLabel = await formatUserLabel(incidentData.reporter, voteChannel.guild);
+              const threadGuiltyLabel = await formatUserLabel(incidentData.guiltyDriver, voteChannel.guild);
+              const resolvedName = buildIncidentThreadName({
+                incidentNumber: incidentData.incidentNumber || 'Onbekend',
+                reporterTag: threadReporterLabel,
+                guiltyDriver: threadGuiltyLabel,
+                status: 'resolved'
+              });
+              await voteChannel.setName(resolvedName);
+            } catch {}
+          }
+
+          // Verwijder de "Incident afhandlen" knop-post in de thread (best effort),
+          // alleen na succesvolle publicatie in het resolved kanaal.
+          if (voteChannel.isThread?.() && voteChannel.messages?.fetch) {
+            try {
+              const recent = await voteChannel.messages.fetch({ limit: 50 });
+              const target = recent.find((msg) => {
+                if (!msg?.components?.length) return false;
+                const hasFinalizeButton = msg.components.some((row) =>
+                  row.components?.some((c) => c.customId === IDS.FINALIZE_VOTES)
+                );
+                return hasFinalizeButton;
+              });
+              if (target?.deletable) {
+                await target.delete();
+              }
+            } catch {}
+          }
         } else {
           console.warn('Resolved target not found or not accessible', {
             resolvedTargetId,
@@ -1910,7 +1973,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return true;
     }
 
-    if (id === IDS.FINALIZE_CONFIRM || id === IDS.FINALIZE_CANCEL) {
+    if (id === IDS.FINALIZE_CONFIRM || id === IDS.FINALIZE_CANCEL || id === IDS.FINALIZE_EDIT) {
       const pending = pendingFinalizations.get(interaction.user.id);
       if (!pending || pending.stage !== 'preview') {
         await interaction.reply({ content: '❌ Geen open voorvertoning gevonden.', flags: MessageFlags.Ephemeral });
@@ -1927,10 +1990,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
+      if (interaction.customId === IDS.FINALIZE_EDIT) {
+        await interaction.showModal(buildFinalizeModal({ finalText: pending.finalText || '' }));
+        return true;
+      }
+
       if (interaction.customId === IDS.FINALIZE_CANCEL) {
         pendingFinalizations.delete(interaction.user.id);
         await interaction.update({
-          content: '❎ Afhandeling geannuleerd. Start opnieuw om te bewerken.',
+          content: '❌ Afhandeling geannuleerd. Start opnieuw om te bewerken.',
           components: [],
           embeds: []
         });
@@ -1962,6 +2030,89 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
     }
     const isVoteMessage = !!incidentData;
+
+    if (id === IDS.FINALIZE_VOTES && !isVoteMessage) {
+      if (!interaction.channel?.isThread?.()) {
+        await interaction.reply({
+          content: '❌ Afhandelen kan alleen vanuit het incident‑thread.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      // Stemmen alleen in voteChannel
+      if (interaction.channelId !== config.voteChannelId && !isVoteThreadChannel(interaction.channel)) {
+        await interaction.reply({ content: '❌ Afhandelen kan alleen in het stem-kanaal.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      // Alleen stewards
+      if (!isSteward(interaction.member)) {
+        await interaction.reply({ content: '❌ Alleen stewards kunnen afhandelen!', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      let resolvedIncident = null;
+      let resolvedMessageId = interaction.message.id;
+      let resolvedChannelId = interaction.channelId;
+
+      const starter = await interaction.channel.fetchStarterMessage().catch(() => null);
+      if (starter) {
+        const recovered = hydrateIncidentFromMessage(starter);
+        if (recovered) {
+          resolvedIncident = recovered;
+          resolvedMessageId = starter.id;
+        }
+      }
+
+      const ticketFromThread = extractIncidentNumberFromText(interaction.channel.name || '');
+      if (!resolvedIncident && ticketFromThread) {
+        const recoveredEntry = await recoverIncidentByNumber(ticketFromThread);
+        if (recoveredEntry) {
+          const [messageId, incidentDataFromStore] = recoveredEntry;
+          resolvedIncident = incidentDataFromStore || null;
+          resolvedMessageId = messageId || resolvedMessageId;
+          resolvedChannelId = incidentDataFromStore?.threadId || resolvedChannelId;
+        }
+      }
+
+      if (resolvedIncident && ticketFromThread) {
+        const normalizedThreadTicket = normalizeTicketInput(ticketFromThread);
+        if (resolvedIncident.incidentNumber && normalizeTicketInput(resolvedIncident.incidentNumber) !== normalizedThreadTicket) {
+          await interaction.reply({
+            content: '❌ Dit afhandelknopje hoort niet bij dit incident‑thread.',
+            flags: MessageFlags.Ephemeral
+          });
+          return true;
+        }
+      }
+
+      if (!resolvedIncident) {
+        const recovered = hydrateIncidentFromMessage(interaction.message);
+        if (recovered) {
+          resolvedIncident = recovered;
+        }
+      }
+
+      if (!resolvedIncident) {
+        await interaction.reply({
+          content: '❌ Incident niet gevonden of al afgehandeld.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      pendingFinalizations.set(interaction.user.id, {
+        messageId: resolvedMessageId,
+        channelId: resolvedChannelId,
+        expiresAt: Date.now() + finalizeWindowMs,
+        incidentNumber: resolvedIncident.incidentNumber || null,
+        incidentSnapshot: resolvedIncident
+      });
+
+      await interaction.showModal(buildFinalizeModal());
+      return true;
+    }
 
     // Laat andere knoppen met rust
     if (!isVoteMessage) return false;
@@ -1998,20 +2149,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         expiresAt: Date.now() + finalizeWindowMs
       });
 
-      const modal = new ModalBuilder()
-        .setCustomId(IDS.FINALIZE_MODAL)
-        .setTitle('Eindoordeel toevoegen');
-
-      const decisionInput = new TextInputBuilder()
-        .setCustomId('eindoordeel')
-        .setLabel('Eindoordeel (vrije tekst)')
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true)
-        .setMaxLength(4000);
-
-      modal.addComponents(new ActionRowBuilder().addComponents(decisionInput));
-
-      await interaction.showModal(modal);
+      await interaction.showModal(buildFinalizeModal());
       return true;
     }
 

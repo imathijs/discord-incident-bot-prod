@@ -15,6 +15,7 @@ module.exports = {
   FINALIZE_MODAL: 'finalize_modal',
   FINALIZE_CONFIRM: 'finalize_confirm',
   FINALIZE_CANCEL: 'finalize_cancel',
+  FINALIZE_EDIT: 'finalize_edit',
   INCIDENT_REVIEW_EDIT: 'incident_review_edit',
   INCIDENT_REVIEW_CONFIRM: 'incident_review_confirm',
   FINALIZE_VOTES: 'finalize_votes',
