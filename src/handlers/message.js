@@ -329,6 +329,10 @@ function registerMessageHandlers(client, { config, state }) {
     if (message.author.bot) return;
     if (message.guildId && allowedGuildId && message.guildId !== allowedGuildId) return;
 
+    const urls = extractUrls(message.content);
+    const allowedUrls = urls.filter(isAllowedEvidenceUrl);
+    const hasEvidencePayload = message.attachments.size > 0 || allowedUrls.length > 0;
+
     const pendingByUser = pendingGuiltyReplies.get(message.author.id);
     if (!message.guildId && pendingByUser && typeof pendingByUser.get === 'function') {
       const resolved = await resolvePendingGuiltyEntry({
@@ -368,11 +372,14 @@ function registerMessageHandlers(client, { config, state }) {
       const ticketInput = extractIncidentNumber(message.content || '');
       const normalizedTicket = normalizeTicketInput(ticketInput);
       if (!normalizedTicket) {
-        await message.reply(
-          '❌ Incidentnummer ontbreekt. Stuur je reactie met het incidentnummer, bijvoorbeeld:\n' +
-            '`INC-1234 Mijn verhaal over het incident...`'
-        );
-        return;
+        const pending = pendingEvidence.get(message.author.id);
+        if (!(pending && pending.channelId === message.channelId && hasEvidencePayload)) {
+          await message.reply(
+            '❌ Incidentnummer ontbreekt. Stuur je reactie met het incidentnummer, bijvoorbeeld:\n' +
+              '`INC-1234 Mijn verhaal over het incident...`'
+          );
+          return;
+        }
       }
 
       const found = await findIncidentMessageByNumber(client, config, normalizedTicket);
@@ -486,9 +493,7 @@ function registerMessageHandlers(client, { config, state }) {
       await safeDelete(message);
     }
 
-    const urls = extractUrls(message.content);
-    const allowedUrls = urls.filter(isAllowedEvidenceUrl);
-    if (message.attachments.size === 0 && allowedUrls.length === 0) return;
+    if (!hasEvidencePayload) return;
 
     const pending = pendingEvidence.get(message.author.id);
     if (!pending) return;
