@@ -27,9 +27,10 @@ De bot verzorgt:
 2) Reageer binnen 2 dagen.
 3) Zet het incidentnummer in je bericht als je tekst wilt sturen, bijvoorbeeld:
    `INC-1234 Mijn verhaal over het incident...`
-4) Alleen een bijlage/URL sturen? Dat kan binnen 10 minuten na de melding, dan is geen incidentnummer nodig.
-5) Alleen de melder of schuldige rijder kan reageren.
-6) Je kunt maar één keer reageren per incident.
+4) Alleen de **melder** kan binnen 10 minuten zonder incidentnummer bewijs (bijlage/URL) sturen.
+5) Voor extra bewijs bij een wederwoord moet altijd het incidentnummer in de DM staan.
+6) Alleen de melder of schuldige rijder kan reageren.
+7) Je kunt maar één keer reageren per incident.
 
 ## How‑to: incident terugnemen (leden)
 Gebruik dit alleen zolang het incident nog **niet** is afgehandeld.

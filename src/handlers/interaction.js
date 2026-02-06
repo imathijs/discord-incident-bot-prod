@@ -1260,12 +1260,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const appealEmbed = new EmbedBuilder()
         .setColor('#1E90FF')
         .setTitle(`🗣️ Wederwoord - ${incidentNumber}`)
-        .addFields(
-          { name: '🔢 Incidentnummer', value: incidentNumber, inline: true },
-          { name: '👤 Ingediend door', value: interaction.user.tag, inline: true },
-          { name: '📝 Verhaal', value: story },
-          { name: '🎥 Bewijs', value: evidenceLinks }
-        )
+        .setDescription([story, evidenceLinks].filter(Boolean).join('\n'))
         .setTimestamp();
 
       const appealMessage = await voteChannel.send({

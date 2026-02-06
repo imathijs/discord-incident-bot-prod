@@ -253,26 +253,10 @@ const sendGuiltyReplyToStewards = async ({
   const responseEmbed = new EmbedBuilder()
     .setColor('#F1C40F')
     .setTitle(`🗣️ Reactie tegenpartij - ${pendingEntry.incidentNumber || incidentKey || 'Onbekend'}`)
-    .addFields(
-      {
-        name: '🔢 Incidentnummer',
-        value: pendingEntry.incidentNumber || incidentKey || 'Onbekend',
-        inline: true
-      },
-      { name: '👤 Tegenpartij', value: message.author.tag, inline: true },
-      { name: '👤 Ingediend door', value: pendingEntry.reporterTag || 'Onbekend', inline: true },
-      { name: '🏁 Race', value: pendingEntry.raceName || 'Onbekend', inline: true },
-      { name: '🔢 Ronde', value: pendingEntry.round || 'Onbekend', inline: true },
-      { name: '📝 Reactie', value: responseText || '*Geen tekst meegeleverd.*' }
+    .setDescription(
+      [responseText || '*Geen tekst meegeleverd.*', ...attachmentLinks].filter(Boolean).join('\n')
     )
     .setTimestamp();
-
-  if (attachmentLinks.length > 0) {
-    responseEmbed.addFields({
-      name: '📎 Bijlagen',
-      value: attachmentLinks.join('\n')
-    });
-  }
 
   await voteChannel.send({
     content: `<@&${stewardRoleId}> - Reactie <@${message.author.id}> ontvangen voor incident ${
@@ -370,18 +354,41 @@ function registerMessageHandlers(client, { config, state }) {
 
     if (!message.guildId) {
       const ticketInput = extractIncidentNumber(message.content || '');
-      const normalizedTicket = normalizeTicketInput(ticketInput);
+      let normalizedTicket = normalizeTicketInput(ticketInput);
+      const pendingForEvidence = pendingEvidence.get(message.author.id);
+      const isEvidenceFlow =
+        hasEvidencePayload &&
+        pendingForEvidence &&
+        pendingForEvidence.channelId === message.channelId;
       if (!normalizedTicket) {
-        const pending = pendingEvidence.get(message.author.id);
-        if (!(pending && pending.channelId === message.channelId && hasEvidencePayload)) {
+        if (!isEvidenceFlow) {
           await message.reply(
             '❌ Incidentnummer ontbreekt. Stuur je reactie met het incidentnummer, bijvoorbeeld:\n' +
               '`INC-1234 Mijn verhaal over het incident...`'
           );
           return;
         }
+        if (pendingForEvidence?.type === 'appeal') {
+          await message.reply(
+            '❌ Voeg het incidentnummer toe om extra bewijs te delen, bijvoorbeeld:\n' +
+              '`INC-1234 Extra beelden/links voor mijn wederwoord`'
+          );
+          return;
+        }
       }
 
+      const allowEvidenceWithoutTicket = pendingForEvidence?.type === 'incident';
+      const treatAsEvidence =
+        isEvidenceFlow && (allowEvidenceWithoutTicket || normalizedTicket);
+
+      if (treatAsEvidence) {
+        // Evidence uploads within the 10-minute window should not be forced into the reply flow.
+        normalizedTicket = '';
+      }
+
+      if (!normalizedTicket) {
+        // No reply flow; evidence flow below will handle attachments/links.
+      } else {
       const found = await findIncidentMessageByNumber(client, config, normalizedTicket);
       if (!found?.message) {
         await message.reply('❌ Incidentnummer niet gevonden. Controleer of het klopt.');
@@ -444,6 +451,7 @@ function registerMessageHandlers(client, { config, state }) {
         `✅ Je reactie is doorgestuurd naar de stewards voor incident **${pendingEntry.incidentNumber}**.`
       );
       return;
+      }
     }
 
     if (incidentChatChannelId && message.mentions.has(client.user) && message.channelId !== incidentChatChannelId) {
