@@ -22,6 +22,14 @@ De bot verzorgt:
 8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs komt zichtbaar in de incident‑thread.
 9) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
 
+## Schuldige rijder – reageren via DM (binnen 2 dagen)
+1) Je ontvangt een DM wanneer een incident is ingediend.
+2) Reageer binnen 2 dagen.
+3) Zet altijd het incidentnummer in je bericht, bijvoorbeeld:
+   `INC-1234 Mijn verhaal over het incident...`
+4) Alleen de melder of schuldige rijder kan reageren.
+5) Je kunt maar één keer reageren per incident.
+
 ## How‑to: incident terugnemen (leden)
 Gebruik dit alleen zolang het incident nog **niet** is afgehandeld.
 1) Voer het commando uit: `/raceincident neemterug ticketnummer:<INC-xxxxx>`.

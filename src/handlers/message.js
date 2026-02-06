@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { evidenceWindowMs } = require('../constants');
+const { evidenceWindowMs, guiltyReplyWindowMs } = require('../constants');
 const { buildEvidencePromptRow, downloadAttachment, scheduleMessageDeletion } = require('../utils/evidence');
 const { fetchTextTargetChannel } = require('../utils/channels');
 const { editMessageWithRetry } = require('../utils/messages');
@@ -16,12 +16,136 @@ const extractIncidentNumber = (content = '') => {
   return match ? match[0].toUpperCase() : null;
 };
 
+const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
+const normalizeTicketInput = (value) => {
+  const normalized = normalizeIncidentNumber(value);
+  if (!normalized) return '';
+  if (normalized.startsWith('INC-')) return normalized;
+  if (/^\d+$/.test(normalized)) return `INC-${normalized}`;
+  return normalized;
+};
+
+const getEmbedFieldValue = (embed, name) => {
+  const fields = embed?.fields || [];
+  const match = fields.find((field) => field.name === name);
+  return match?.value ? String(match.value).trim() : '';
+};
+
+const extractIncidentNumberFromEmbed = (embed) => {
+  const fromField = getEmbedFieldValue(embed, '🔢 Incidentnummer');
+  if (fromField) return fromField;
+  const title = embed?.title || '';
+  const match = String(title).match(/INC-\d+/i);
+  return match ? match[0].toUpperCase() : '';
+};
+
+const extractUserIdFromText = (value) => {
+  const match = String(value || '').match(/<@!?(\d+)>/);
+  return match ? match[1] : null;
+};
+
 const safeDelete = async (msg) => {
   if (msg?.deletable) await msg.delete().catch(() => {});
 };
 
 const buildIncidentLabel = (pending, activeIncidents) =>
   pending.incidentNumber || activeIncidents.get(pending.messageId)?.incidentNumber || 'Onbekend';
+
+const hydrateIncidentFromMessage = (message) => {
+  const embed = message?.embeds?.[0];
+  if (!embed) return null;
+  const incidentNumber = extractIncidentNumberFromEmbed(embed);
+  if (!incidentNumber) return null;
+  const guiltyValue = getEmbedFieldValue(embed, '⚠️ Schuldige rijder') || 'Onbekend';
+  const reporterValue = getEmbedFieldValue(embed, '👤 Ingediend door') || 'Onbekend';
+  return {
+    incidentNumber,
+    raceName: getEmbedFieldValue(embed, '🏁 Race') || 'Onbekend',
+    round: getEmbedFieldValue(embed, '🔢 Ronde') || 'Onbekend',
+    guiltyId: extractUserIdFromText(guiltyValue),
+    guiltyDriver: guiltyValue,
+    reporter: reporterValue,
+    reporterId: extractUserIdFromText(reporterValue)
+  };
+};
+
+const findIncidentThreadByNumber = async (client, config, normalizedTicket) => {
+  const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+  if (!forumChannel?.threads?.fetchActive) return null;
+  const matchesTicket = (thread) => {
+    const threadIncident = extractIncidentNumber(thread?.name || '');
+    return threadIncident === normalizedTicket || (thread?.name || '').toUpperCase().includes(normalizedTicket);
+  };
+
+  const active = await forumChannel.threads.fetchActive().catch(() => null);
+  if (active?.threads?.size) {
+    for (const thread of active.threads.values()) {
+      if (matchesTicket(thread)) return thread;
+    }
+  }
+
+  const archived = await forumChannel.threads.fetchArchived({ type: 'public', limit: 100 }).catch(() => null);
+  if (archived?.threads?.size) {
+    for (const thread of archived.threads.values()) {
+      if (matchesTicket(thread)) return thread;
+    }
+  }
+
+  return null;
+};
+
+const findIncidentMessageByNumber = async (client, config, normalizedTicket, maxMessages = 300) => {
+  const thread = await findIncidentThreadByNumber(client, config, normalizedTicket);
+  if (thread) {
+    const starter = await thread.fetchStarterMessage().catch(() => null);
+    if (starter) return { message: starter, threadId: thread.id };
+  }
+
+  const voteChannel = await fetchTextTargetChannel(client, config.voteChannelId);
+  if (!voteChannel?.messages?.fetch) return null;
+
+  let remaining = Math.max(0, maxMessages);
+  let before = undefined;
+  while (remaining > 0) {
+    const batch = await voteChannel.messages.fetch({ limit: Math.min(100, remaining), before }).catch(() => null);
+    if (!batch?.size) break;
+    for (const message of batch.values()) {
+      const embed = message.embeds?.[0];
+      const ticketFromEmbed = extractIncidentNumberFromEmbed(embed);
+      const matches =
+        (ticketFromEmbed && normalizeIncidentNumber(ticketFromEmbed) === normalizedTicket) ||
+        normalizeIncidentNumber(message.content).includes(normalizedTicket) ||
+        normalizeIncidentNumber(embed?.title).includes(normalizedTicket);
+      if (matches) return { message, threadId: message.channelId };
+    }
+    remaining -= batch.size;
+    before = batch.last().id;
+  }
+  return null;
+};
+
+const hasPriorGuiltyReply = async (channel, incidentNumber, userId) => {
+  if (!channel?.messages?.fetch) return false;
+  const normalized = normalizeTicketInput(incidentNumber);
+  try {
+    const recent = await channel.messages.fetch({ limit: 100 });
+    for (const msg of recent.values()) {
+      const content = normalizeIncidentNumber(msg.content);
+      if (content.includes(normalized) && msg.content.includes(`<@${userId}>`) && msg.content.includes('Reactie')) {
+        return true;
+      }
+      const embed = msg.embeds?.[0];
+      if (!embed) continue;
+      const title = String(embed.title || '').toUpperCase();
+      const ticket = normalizeIncidentNumber(extractIncidentNumberFromEmbed(embed));
+      const against = getEmbedFieldValue(embed, '👤 Tegenpartij');
+      if (ticket === normalized && title.includes('REACTIE TEGENPARTIJ') && against.includes('#')) {
+        if (msg.content.includes(`<@${userId}>`)) return true;
+      }
+    }
+  } catch {}
+  return false;
+};
 
 const updateEvidenceEmbed = async ({ voteMessage, evidenceText, authorId }) => {
   const embed = EmbedBuilder.from(voteMessage.embeds[0]);
@@ -238,6 +362,81 @@ function registerMessageHandlers(client, { config, state }) {
         });
         return;
       }
+    }
+
+    if (!message.guildId) {
+      const ticketInput = extractIncidentNumber(message.content || '');
+      const normalizedTicket = normalizeTicketInput(ticketInput);
+      if (!normalizedTicket) {
+        await message.reply(
+          '❌ Incidentnummer ontbreekt. Stuur je reactie met het incidentnummer, bijvoorbeeld:\n' +
+            '`INC-1234 Mijn verhaal over het incident...`'
+        );
+        return;
+      }
+
+      const found = await findIncidentMessageByNumber(client, config, normalizedTicket);
+      if (!found?.message) {
+        await message.reply('❌ Incidentnummer niet gevonden. Controleer of het klopt.');
+        return;
+      }
+
+      const incidentData = hydrateIncidentFromMessage(found.message);
+      if (!incidentData) {
+        await message.reply('❌ Incidentgegevens niet gevonden. Neem contact op met de stewards.');
+        return;
+      }
+
+      const allowed =
+        (incidentData.guiltyId && incidentData.guiltyId === message.author.id) ||
+        (incidentData.reporterId && incidentData.reporterId === message.author.id);
+      if (!allowed) {
+        await message.reply('❌ Alleen de melder of de schuldige rijder kan op dit incident reageren.');
+        return;
+      }
+
+      const createdAt = found.message.createdTimestamp || found.message.createdAt?.getTime?.();
+      if (createdAt && Date.now() - createdAt > guiltyReplyWindowMs) {
+        await message.reply('⏳ Reactietermijn verlopen. Neem contact op met de stewards.');
+        return;
+      }
+
+      const voteChannel = await fetchTextTargetChannel(client, found.threadId || config.voteChannelId);
+      if (!voteChannel) {
+        await message.reply('❌ Steward-kanaal niet gevonden. Probeer later opnieuw.');
+        return;
+      }
+
+      if (await hasPriorGuiltyReply(voteChannel, normalizedTicket, message.author.id)) {
+        await message.reply(`✅ Je reactie voor incident **${normalizedTicket}** is al ontvangen.`);
+        return;
+      }
+
+      const pendingEntry = {
+        incidentNumber: incidentData.incidentNumber || normalizedTicket,
+        raceName: incidentData.raceName,
+        round: incidentData.round,
+        reporterTag: incidentData.reporter,
+        messageId: found.message.id,
+        threadId: found.threadId,
+        channelId: message.channelId,
+        expiresAt: createdAt ? createdAt + guiltyReplyWindowMs : Date.now() + guiltyReplyWindowMs,
+        responded: false
+      };
+
+      const sent = await sendGuiltyReplyToStewards({
+        message,
+        pendingEntry,
+        incidentKey: normalizedTicket,
+        voteChannel,
+        stewardRoleId: config.stewardRoleId
+      });
+      if (!sent) return;
+
+      await message.reply(
+        `✅ Je reactie is doorgestuurd naar de stewards voor incident **${pendingEntry.incidentNumber}**.`
+      );
+      return;
     }
 
     if (incidentChatChannelId && message.mentions.has(client.user) && message.channelId !== incidentChatChannelId) {
