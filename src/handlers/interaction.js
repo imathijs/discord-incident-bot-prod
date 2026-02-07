@@ -53,6 +53,45 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return member.roles?.cache?.has(config.stewardRoleId);
   }
 
+  const isStewardById = async (guild, userId) => {
+    if (!guild || !userId) return false;
+    if (!config.stewardRoleId) return false;
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) return false;
+    return isSteward(member);
+  };
+
+  const getStewardInvolvementNote = async (guild, incidentData) => {
+    if (!incidentData) return null;
+    const [reporterIsSteward, guiltyIsSteward] = await Promise.all([
+      incidentData.reporterId ? isStewardById(guild, incidentData.reporterId) : false,
+      incidentData.guiltyId ? isStewardById(guild, incidentData.guiltyId) : false
+    ]);
+    const stewardRoles = [];
+    if (reporterIsSteward) stewardRoles.push('indiener');
+    if (guiltyIsSteward) stewardRoles.push('tegenpartij');
+    if (stewardRoles.length === 0) return null;
+    return `Steward betrokken als ${stewardRoles.join(' en ')}. Betrokken stewards mogen niet stemmen.`;
+  };
+
+  const ensureStewardNoteInEmbed = async ({ embed, guild, incidentData }) => {
+    if (!embed) return { embed: null, changed: false };
+    const note = await getStewardInvolvementNote(guild, incidentData);
+    if (!note) return { embed, changed: false };
+
+    const newEmbed = EmbedBuilder.from(embed);
+    const fields = [...(newEmbed.data.fields ?? [])];
+    if (fields.some((field) => field?.name === '⚠️ Opmerking')) {
+      return { embed: newEmbed, changed: false };
+    }
+
+    const descriptionIndex = fields.findIndex((field) => field?.name === '📝 Beschrijving');
+    const insertIndex = descriptionIndex >= 0 ? descriptionIndex + 1 : fields.length;
+    fields.splice(insertIndex, 0, { name: '⚠️ Opmerking', value: note });
+    newEmbed.setFields(fields);
+    return { embed: newEmbed, changed: true };
+  };
+
   const pad2 = (value) => String(value).padStart(2, '0');
   const formatSheetTimestamp = (date = new Date()) => {
     const year = date.getFullYear();
@@ -609,13 +648,20 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const baseEmbed = interaction.message?.embeds?.[0];
     if (!baseEmbed) return false;
 
-    const newEmbed = EmbedBuilder.from(baseEmbed);
+    let newEmbed = EmbedBuilder.from(baseEmbed);
     const fields = newEmbed.data.fields ?? [];
     const tallyIndex = fields.findIndex((f) => f.name === tallyFieldName);
     if (tallyIndex >= 0) fields[tallyIndex].value = `\`\`\`\n${tally}\n\`\`\``;
     const votesIndex = fields.findIndex((f) => f.name === votesFieldName);
     if (votesIndex >= 0) fields[votesIndex].value = voteList;
     newEmbed.setFields(fields);
+
+    const ensured = await ensureStewardNoteInEmbed({
+      embed: newEmbed,
+      guild: interaction.guild,
+      incidentData
+    });
+    newEmbed = ensured.embed || newEmbed;
 
     try {
       await editMessageWithRetry(
@@ -666,26 +712,38 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     };
     const reporterLabelName = truncateLabelName(pending.reporterTag);
 
+    const stewardNote = await getStewardInvolvementNote(interaction.guild, {
+      reporterId: pending.reporterId,
+      guiltyId: pending.guiltyId
+    });
+
+    const incidentFields = [
+      { name: '👤 Ingediend door', value: reporterMention, inline: true },
+      { name: '🏁 Divisie', value: division, inline: true },
+      { name: '🏁 Race', value: raceName, inline: true },
+      { name: '🔢 Ronde', value: round, inline: true },
+      { name: '🏁 Circuit', value: corner || 'Onbekend', inline: true },
+      { name: '⚠️ Schuldige rijder', value: guiltyMention || guiltyDriver, inline: true },
+      { name: '📌 Reden', value: reasonLabel },
+      { name: '📝 Beschrijving', value: description }
+    ];
+    if (stewardNote) {
+      incidentFields.push({ name: '⚠️ Opmerking', value: stewardNote });
+    }
+    incidentFields.push(
+      { name: '\u200b', value: '\u200b' },
+      { name: '🎥 Bewijs', value: evidence },
+      { name: '\u200b', value: '\u200b' },
+      { name: `📊 Tussenstand - ${guiltyDriver}`, value: 'Nog geen stemmen.' },
+      { name: `📊 Tussenstand - ${pending.reporterTag}`, value: 'Nog geen stemmen.' },
+      { name: `🗳️ Stemmen - ${guiltyDriver}`, value: 'Nog geen stemmen.' },
+      { name: `🗳️ Stemmen - ${pending.reporterTag}`, value: 'Nog geen stemmen.' }
+    );
+
     const incidentEmbed = new EmbedBuilder()
       .setColor('#FF6B00')
       .setTitle(`🚨 Incident ${incidentNumber}`)
-      .addFields(
-        { name: '👤 Ingediend door', value: reporterMention, inline: true },
-        { name: '🏁 Divisie', value: division, inline: true },
-        { name: '🏁 Race', value: raceName, inline: true },
-        { name: '🔢 Ronde', value: round, inline: true },
-        { name: '🏁 Circuit', value: corner || 'Onbekend', inline: true },
-        { name: '⚠️ Schuldige rijder', value: guiltyMention || guiltyDriver, inline: true },
-        { name: '📌 Reden', value: reasonLabel },
-        { name: '📝 Beschrijving', value: description },
-        { name: '\u200b', value: '\u200b' },
-        { name: '🎥 Bewijs', value: evidence },
-        { name: '\u200b', value: '\u200b' },
-        { name: `📊 Tussenstand - ${guiltyDriver}`, value: 'Nog geen stemmen.' },
-        { name: `📊 Tussenstand - ${pending.reporterTag}`, value: 'Nog geen stemmen.' },
-        { name: `🗳️ Stemmen - ${guiltyDriver}`, value: 'Nog geen stemmen.' },
-        { name: `🗳️ Stemmen - ${pending.reporterTag}`, value: 'Nog geen stemmen.' }
-      )
+      .addFields(...incidentFields)
       .setTimestamp();
 
     const voteButtons = new ActionRowBuilder().addComponents(
@@ -2344,6 +2402,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return true;
     }
 
+    const involvedIds = [incidentData.reporterId, incidentData.guiltyId].filter(Boolean);
+    if (involvedIds.includes(interaction.user.id)) {
+      await interaction.reply({
+        content: '❌ Je bent betrokken bij dit incident (indiener/tegenpartij) en mag daarom niet stemmen.',
+        flags: MessageFlags.Ephemeral
+      });
+      return true;
+    }
+
     // Zorg dat gebruiker entry heeft
     if (!incidentData.votes[interaction.user.id]) {
       incidentData.votes[interaction.user.id] = {
@@ -2571,6 +2638,33 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       console.log('✅ Forum kanaal permissies OK.', {
         voteChannelId: config.voteChannelId,
         channelType: forumChannel.type
+      });
+    }
+
+    try {
+      const active = await forumChannel.threads.fetchActive().catch(() => null);
+      const threads = active?.threads?.values?.() || [];
+      for (const thread of threads) {
+        const starter = await thread.fetchStarterMessage().catch(() => null);
+        if (!starter?.embeds?.[0]) continue;
+        const incidentData = hydrateIncidentFromMessage(starter);
+        if (!incidentData) continue;
+        const ensured = await ensureStewardNoteInEmbed({
+          embed: starter.embeds[0],
+          guild: forumChannel.guild,
+          incidentData
+        });
+        if (!ensured.changed) continue;
+        await editMessageWithRetry(
+          starter,
+          { embeds: [ensured.embed], components: starter.components },
+          'Backfill steward note'
+        );
+      }
+    } catch (err) {
+      console.warn('⚠️ Kon steward-notities niet retroactief bijwerken.', {
+        voteChannelId: config.voteChannelId,
+        error: err?.message
       });
     }
   });
