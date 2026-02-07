@@ -50,7 +50,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   };
 
   function isSteward(member) {
-    return member.roles?.cache?.has(config.stewardRoleId);
+    if (!member || !config.stewardRoleId) return false;
+    const roles = member.roles;
+    if (!roles) return false;
+    if (Array.isArray(roles)) return roles.includes(config.stewardRoleId);
+    if (roles.cache?.has) return roles.cache.has(config.stewardRoleId);
+    if (typeof roles.has === 'function') return roles.has(config.stewardRoleId);
+    return false;
   }
 
   const isStewardById = async (guild, userId) => {
@@ -650,9 +656,28 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     let newEmbed = EmbedBuilder.from(baseEmbed);
     const fields = newEmbed.data.fields ?? [];
-    const tallyIndex = fields.findIndex((f) => f.name === tallyFieldName);
+    const resolveFieldName = (prefix, type) => {
+      const matches = fields
+        .filter((f) => typeof f?.name === 'string' && f.name.startsWith(prefix))
+        .map((f) => f.name);
+      if (!matches.length) return null;
+      if (type === 'reporter') return matches[1] || matches[0];
+      return matches[0];
+    };
+
+    let tallyIndex = fields.findIndex((f) => f.name === tallyFieldName);
+    if (tallyIndex < 0) {
+      const resolved = resolveFieldName('📊 Tussenstand - ', tallyType);
+      if (resolved) tallyFieldName = resolved;
+      tallyIndex = fields.findIndex((f) => f.name === tallyFieldName);
+    }
     if (tallyIndex >= 0) fields[tallyIndex].value = `\`\`\`\n${tally}\n\`\`\``;
-    const votesIndex = fields.findIndex((f) => f.name === votesFieldName);
+    let votesIndex = fields.findIndex((f) => f.name === votesFieldName);
+    if (votesIndex < 0) {
+      const resolved = resolveFieldName('🗳️ Stemmen - ', tallyType);
+      if (resolved) votesFieldName = resolved;
+      votesIndex = fields.findIndex((f) => f.name === votesFieldName);
+    }
     if (votesIndex >= 0) fields[votesIndex].value = voteList;
     newEmbed.setFields(fields);
 
@@ -1966,7 +1991,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           : '';
 
       await interaction.reply({
-        content: `Welke incident wil je intrekken?${extraNote}`,
+        content: `Welk incident wil je intrekken?${extraNote}`,
         components: [row],
         flags: MessageFlags.Ephemeral
       });
