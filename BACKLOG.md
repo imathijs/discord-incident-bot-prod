@@ -13,6 +13,7 @@ Legenda:
   - Story 3 — Sheet row opslaan in embed
 - Doel:
   - Afhandelen werkt weer na restart zonder handmatige interventie.
+Afgerond (recent): Stemmen blokkeren voor betrokken stewards (indiener/tegenpartij) + opmerking in incident (ook retroactief bij open threads na herstart).
 
 ### Sprint 2 (2 weken)
 - Scope:

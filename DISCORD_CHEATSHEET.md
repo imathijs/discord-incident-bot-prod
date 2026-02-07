@@ -69,7 +69,11 @@ Zie je ze niet? Herstart de bot en wacht 1–5 minuten.
 - **Geen DM's**: gebruiker heeft DM's uit of bot mist intent.
 - **Thread issues**: private threads vereisen dat de bot wordt toegevoegd.
 
-## 9) Snelle checklijst
+## 9) Stemregels (stewards)
+- Als een steward betrokken is als **indiener** of **tegenpartij**, mag die persoon niet stemmen.
+- Het incident krijgt dan een veld **⚠️ Opmerking** met deze melding (ook bij bestaande open threads na herstart).
+
+## 10) Snelle checklijst
 - Bot invited met juiste permissions
 - Message Content Intent aan
 - IDs kloppen in `config.json`

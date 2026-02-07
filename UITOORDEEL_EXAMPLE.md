@@ -13,3 +13,6 @@ Het incident is veroorzaakt door een late remactie zonder voldoende overlap. Er 
 
 __Opmerking__
 Let op met remmomenten in druk verkeer; de verantwoordelijkheid ligt bij de achteropkomende auto.
+
+__Procesnotitie__
+Als een steward betrokken is als **indiener** of **tegenpartij**, kan die persoon niet stemmen en komt dit als **⚠️ Opmerking** in het incident te staan.

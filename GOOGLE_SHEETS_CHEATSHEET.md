@@ -53,6 +53,8 @@ GOOGLE_SERVICE_ACCOUNT_FILE=/pad/naar/service-account.json
 - Na indienen: er wordt een nieuwe rij toegevoegd met **Status incident = New**.
 - Na afhandelen: de status wordt bijgewerkt naar **Afgehandeld**.
 
+Opmerking: stemregels voor betrokken stewards (indiener/tegenpartij) werken los van Sheets en hebben geen invloed op de logging.
+
 ## 6) Troubleshooting (kort)
 - Geen logging? Controleer:
   - `googleSheetsEnabled=true`

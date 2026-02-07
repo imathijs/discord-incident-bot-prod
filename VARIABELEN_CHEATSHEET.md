@@ -20,6 +20,8 @@ Belangrijkste velden (gebruik je eigen IDs):
 - `googleSheetsSpreadsheetId` – spreadsheet‑ID
 - `googleSheetsSheetName` – tabbladnaam (sheet)
 
+Let op: stemregels zijn automatisch. Als een steward betrokken is als **indiener** of **tegenpartij**, kan die persoon niet stemmen en verschijnt er een **⚠️ Opmerking** in het incident.
+
 Voorbeeld:
 ```json
 {

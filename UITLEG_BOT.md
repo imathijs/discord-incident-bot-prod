@@ -10,6 +10,7 @@ De bot verzorgt:
 - publicatie van uitslagen in het resolved kanaal (incl. divisie);
 - optionele logging van incidenten in Google Sheets (status wordt bijgewerkt bij afhandeling);
 - een optionele DM‑reactie van de schuldige tijdens de behandeling.
+- blokkeert stemmen van stewards die betrokken zijn als indiener of tegenpartij (met opmerking bij het incident).
 
 ## Incident melder – stappen
 1) Ga naar het meld‑kanaal en klik op **Meld Incident**.
@@ -41,6 +42,10 @@ Gebruik dit alleen zolang het incident nog **niet** is afgehandeld.
 5) Als het incident al is afgehandeld krijg je de melding dat terugnemen niet meer kan.
 
 ## Stewards (beheer)
+### Stemregels bij betrokken stewards
+- Als een steward betrokken is als **indiener** of **tegenpartij**, mag die persoon niet stemmen.
+- Het incident krijgt dan een veld **⚠️ Opmerking** met deze melding (ook bij bestaande open threads na herstart).
+
 ### Incident terugnemen: wat gebeurt er?
 - Alleen de oorspronkelijke indiener mag een incident terugnemen.
 - Als het incident al is afgehandeld, wordt terugnemen geweigerd en verschijnt er een melding in de thread.

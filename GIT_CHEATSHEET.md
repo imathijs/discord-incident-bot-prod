@@ -39,3 +39,6 @@ git restore --staged <file>
 ```bash
 git log --oneline --decorate -10
 ```
+
+## Projectnotitie
+Stemmen door betrokken stewards (indiener/tegenpartij) worden geblokkeerd en het incident krijgt een **⚠️ Opmerking**.

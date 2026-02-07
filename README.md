@@ -11,6 +11,7 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 - Laat stewards stemmen en het eindoordeel publiceren.
 - Publiceert afgehandelde incidenten in het resolved kanaal.
 - Logt incidenten optioneel extern in Google Sheets.
+- Blokkeert stemmen van stewards die betrokken zijn als indiener of tegenpartij en voegt een opmerking toe aan het incident.
 
 ## Hoofdflow (kort)
 1) `raceincident melden` plaatst de meldknop in het meld‑kanaal.
@@ -19,6 +20,10 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 4) Bewijs (uploads/links) wordt aan de incident‑thread toegevoegd.
 5) Schuldige ontvangt DM en kan tijdens de behandeling één keer reageren (max 2 dagen).
 6) Steward sluit af met eindoordeel; bot plaatst dit in het resolved kanaal.
+
+## Stemregels (stewards)
+- Als een steward betrokken is als **indiener** of **tegenpartij**, kan die persoon niet stemmen.
+- Het incident krijgt dan een veld **⚠️ Opmerking** met die melding (ook bij bestaande open threads na herstart).
 
 ## How‑to (leden): incident terugnemen
 Gebruik dit alleen zolang het incident nog **niet** is afgehandeld.
