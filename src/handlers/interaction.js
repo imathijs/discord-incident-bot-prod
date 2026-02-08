@@ -292,15 +292,24 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return items;
   };
 
-  const buildWithdrawSelectOptions = (incidents) =>
-    incidents.map((incident) => {
-      const baseLabel = `${incident.incidentNumber || 'Onbekend'} - ${incident.raceName || 'Onbekend'} (${incident.round || '?'})`;
-      const label = baseLabel.length > 100 ? `${baseLabel.slice(0, 97)}...` : baseLabel;
-      return {
-        label,
-        value: incident.incidentNumber || ''
-      };
-    });
+  const buildWithdrawSelectOptions = async (incidents, guild) => {
+    const options = await Promise.all(
+      incidents.map(async (incident) => {
+        const ticket = incident.incidentNumber || 'Onbekend';
+        const opponentRaw = incident.guiltyDriver || 'Onbekend';
+        const opponent = await formatUserLabel(opponentRaw, guild);
+        const race = incident.raceName || '?';
+        const round = incident.round || '?';
+        const baseLabel = `${ticket} - vs ${opponent} - race ${race} * ronde ${round}`;
+        const label = baseLabel.length > 100 ? `${baseLabel.slice(0, 97)}...` : baseLabel;
+        return {
+          label,
+          value: incident.incidentNumber || ''
+        };
+      })
+    );
+    return options;
+  };
 
   const parseVotesFromEmbed = (embed) => {
     const votes = {};
@@ -1137,7 +1146,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         .setLabel('🚨 Meld Incident')
         .setStyle(ButtonStyle.Danger);
 
-      const row = new ActionRowBuilder().addComponents(reportButton);
+      const withdrawButton = new ButtonBuilder()
+        .setCustomId(IDS.WITHDRAW_INCIDENT_BUTTON)
+        .setEmoji('🗑️')
+        .setLabel('Incident intrekken')
+        .setStyle(ButtonStyle.Secondary);
+
+      const row = new ActionRowBuilder().addComponents(reportButton, withdrawButton);
 
       const embed = new EmbedBuilder()
         .setColor('#FF0000')
@@ -1958,9 +1973,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     if (id === IDS.WITHDRAW_INCIDENT_BUTTON) {
-      if (interaction.channelId !== withdrawButtonChannelId) {
+      if (interaction.channelId !== withdrawButtonChannelId && interaction.channelId !== config.reportChannelId) {
         await interaction.reply({
-          content: '❌ Incident intrekken kan alleen via het intrekken-kanaal.',
+          content: '❌ Incident intrekken kan alleen via het meld-kanaal of intrekken-kanaal.',
           flags: MessageFlags.Ephemeral
         });
         return true;
@@ -1976,7 +1991,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const limited = incidents.slice(0, 25);
-      const options = buildWithdrawSelectOptions(limited);
+      const options = await buildWithdrawSelectOptions(limited, interaction.guild);
       const select = new StringSelectMenuBuilder()
         .setCustomId(IDS.WITHDRAW_SELECT)
         .setPlaceholder('Kies een incident om in te trekken')
