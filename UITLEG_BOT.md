@@ -35,11 +35,21 @@ De bot verzorgt:
 
 ## How‑to: incident terugnemen (leden)
 Gebruik dit alleen zolang het incident nog **niet** is afgehandeld.
+
+Optie A: via de knop
+1) Ga naar het meld‑kanaal.
+2) Klik op **Incident intrekken** (naast **Meld Incident**).
+3) Kies het incident en geef optioneel een reden.
+
+Optie B: via commando
 1) Voer het commando uit: `/raceincident neemterug ticketnummer:<INC-xxxxx>`.
-2) Alleen de indiener kan dit doen.
-3) Het incident wordt verwijderd uit de stem‑thread.
-4) In de incident‑thread verschijnt: “Incident is teruggetrokken door <naam indiener>”.
-5) Als het incident al is afgehandeld krijg je de melding dat terugnemen niet meer kan.
+2) Geef optioneel een reden.
+
+Wat er gebeurt:
+- Alleen de indiener kan dit doen.
+- Het incident wordt verwijderd uit de stem‑thread.
+- In de incident‑thread verschijnt: “Incident is teruggetrokken door <naam indiener>”.
+- Als het incident al is afgehandeld krijg je de melding dat terugnemen niet meer kan.
 
 ## Stewards (beheer)
 ### Stemregels bij betrokken stewards
