@@ -30,8 +30,8 @@ try {
 
 const { config, token, generateIncidentNumber } = require('./src/config');
 const { createState } = require('./src/state');
-const { registerInteractionHandlers } = require('./src/handlers/interaction');
-const { registerMessageHandlers } = require('./src/handlers/message');
+const { registerInteractionHandlers } = require('./src/infrastructure/discord/interaction');
+const { registerMessageHandlers } = require('./src/infrastructure/discord/message');
 
 assertRuntimeRequirements();
 

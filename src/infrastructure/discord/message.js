@@ -1,8 +1,10 @@
 const { EmbedBuilder } = require('discord.js');
-const { evidenceWindowMs, guiltyReplyWindowMs } = require('../constants');
-const { buildEvidencePromptRow, downloadAttachment, scheduleMessageDeletion } = require('../utils/evidence');
-const { fetchTextTargetChannel } = require('../utils/channels');
-const { editMessageWithRetry } = require('../utils/messages');
+const { evidenceWindowMs, guiltyReplyWindowMs } = require('../../constants');
+const { downloadAttachment, scheduleMessageDeletion } = require('../../utils/evidence');
+const { fetchTextTargetChannel } = require('../../utils/channels');
+const { editMessageWithRetry } = require('../../utils/messages');
+const { AddEvidence } = require('../../application/usecases/AddEvidence');
+const { buildEvidencePromptRow } = require('./evidenceUI');
 
 const extractUrls = (content = '') => {
   const matches = content.match(/https?:\/\/\S+/gi) || [];
@@ -285,6 +287,7 @@ function registerMessageHandlers(client, { config, state }) {
   const { pendingEvidence, activeIncidents, pendingGuiltyReplies, autoDeleteMs } = state;
   const incidentChatChannelId = config.incidentChatChannelId;
   const allowedGuildId = config.allowedGuildId;
+  const addEvidence = new AddEvidence();
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
@@ -473,13 +476,16 @@ function registerMessageHandlers(client, { config, state }) {
       await safeDelete(message);
     }
 
-    if (!hasEvidencePayload) return;
-
     const pending = pendingEvidence.get(message.author.id);
-    if (!pending) return;
-    const pendingType = pending.type || 'incident';
-    if (pending.channelId !== message.channelId) return;
-    if (Date.now() > pending.expiresAt) {
+    const pendingType = pending?.type || 'incident';
+    const evidenceCheck = await addEvidence.execute({
+      pending,
+      now: Date.now(),
+      channelId: message.channelId,
+      hasEvidencePayload
+    });
+    if (evidenceCheck.status === 'skip') return;
+    if (evidenceCheck.status === 'expired') {
       pendingEvidence.delete(message.author.id);
       return;
     }

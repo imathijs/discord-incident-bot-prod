@@ -81,8 +81,8 @@ const incidentReasons = [
 
 ## 5) Teksten / DM‑berichten
 Bestanden:
-- `src/handlers/interaction.js` (incident workflow + DM naar schuldige)
-- `src/handlers/message.js` (reacties via DM + bevestigingen)
+- `src/infrastructure/discord/interaction.js` (incident workflow + DM naar schuldige)
+- `src/infrastructure/discord/message.js` (reacties via DM + bevestigingen)
 
 Zoek op sleutelzinnen zoals:
 - `Je incident is verzonden naar de stewards`
@@ -110,4 +110,4 @@ Na aanpassingen in code of config:
 - Pas kanaal‑IDs aan in `config.json`
 - Zet `DISCORD_TOKEN` in `.env`
 - Stel tijden in via `src/constants.js`
-- Pas teksten aan in `src/handlers/interaction.js` / `src/handlers/message.js`
+- Pas teksten aan in `src/infrastructure/discord/interaction.js` / `src/infrastructure/discord/message.js`

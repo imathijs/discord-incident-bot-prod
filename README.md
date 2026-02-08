@@ -94,10 +94,28 @@ Details en setup: `DISCORD_CHEATSHEET.md`.
 
 ## Belangrijke bestanden
 - `index.js` – entrypoint, registreert handlers
-- `src/handlers/interaction.js` – incident workflow + stewards + DM aan schuldige
-- `src/handlers/message.js` – bewijs uploads en DM‑reacties
+- `src/infrastructure/discord/interaction.js` – incident workflow + stewards + DM aan schuldige
+- `src/infrastructure/discord/message.js` – bewijs uploads en DM‑reacties
+- `src/application/usecases/` – use‑cases (CreateIncident, CastVote, FinalizeIncident, RequestAccusedResponse, AddEvidence, WithdrawIncident)
+- `src/domain/` – entities + policies + domain errors
+- `src/infrastructure/discord/DiscordNotificationPort.js` – Discord adapter (threads, embeds, DMs)
+- `src/infrastructure/persistence/` – state/sheets adapters
 - `src/constants.js` – tijdslimieten en incident‑redenen
 - `src/config.js` – config en incidentnummer‑generator
+
+## Structuur (globaal)
+- `src/domain/` – domeinmodel en regels (geen discord.js)
+- `src/application/` – use‑cases + ports (geen discord.js)
+- `src/infrastructure/discord/` – discord.js handlers/adapters
+- `src/infrastructure/persistence/` – storage adapters
+
+## Use‑case flow (kort)
+- `CreateIncident` – verzamelt input → maakt incident thread + sheet row → start evidence/DM flows
+- `CastVote` – valideert stemmer (niet betrokken) → toggelt stem
+- `FinalizeIncident` – berekent uitslag + strafpunten → publiceert eindoordeel
+- `RequestAccusedResponse` – valideert wederwoord‑window → zet pending evidence
+- `AddEvidence` – valideert pending evidence + window → verwerkt upload
+- `WithdrawIncident` – valideert melder → trekt incident in
 
 ## Tijdslimieten (in `src/constants.js`)
 - `evidenceWindowMs`

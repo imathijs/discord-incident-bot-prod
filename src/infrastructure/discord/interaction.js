@@ -20,13 +20,22 @@ const {
   appealWindowMs,
   finalizeWindowMs,
   guiltyReplyWindowMs
-} = require('../constants');
-const { buildTallyText, computePenaltyPoints, mostVotedCategory } = require('../utils/votes');
-const { buildEvidencePromptRow } = require('../utils/evidence');
-const { appendIncidentRow, updateIncidentStatus, updateIncidentResolution } = require('../utils/sheets');
-const { fetchTextTargetChannel, canSendToChannel } = require('../utils/channels');
-const { editMessageWithRetry } = require('../utils/messages');
-const IDS = require('../ids');
+} = require('../../constants');
+const { buildTallyText, computePenaltyPoints, mostVotedCategory } = require('../../utils/votes');
+const { buildEvidencePromptRow } = require('./evidenceUI');
+const { updateIncidentStatus, updateIncidentResolution } = require('../../utils/sheets');
+const { fetchTextTargetChannel, canSendToChannel } = require('../../utils/channels');
+const { editMessageWithRetry } = require('../../utils/messages');
+const IDS = require('../../ids');
+const { CreateIncident } = require('../../application/usecases/CreateIncident');
+const { CastVote } = require('../../application/usecases/CastVote');
+const { FinalizeIncident } = require('../../application/usecases/FinalizeIncident');
+const { RequestAccusedResponse } = require('../../application/usecases/RequestAccusedResponse');
+const { WithdrawIncident } = require('../../application/usecases/WithdrawIncident');
+const { StateIncidentRepository } = require('../persistence/StateIncidentRepository');
+const { WorkflowStateStore } = require('../persistence/WorkflowStateStore');
+const { DiscordNotificationPort } = require('./DiscordNotificationPort');
+const { DomainError } = require('../../domain/errors/DomainError');
 
 function registerInteractionHandlers(client, { config, state, generateIncidentNumber }) {
   const {
@@ -38,6 +47,21 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     pendingGuiltyReplies,
     pendingWithdrawals
   } = state;
+
+  const incidentRepository = new StateIncidentRepository({ config, state });
+  const workflowState = new WorkflowStateStore({ state });
+  const notificationPort = new DiscordNotificationPort({ client, config });
+  const createIncident = new CreateIncident({
+    incidentRepository,
+    notificationPort,
+    workflowState,
+    clock: { now: () => Date.now() },
+    idGenerator: { nextIncidentNumber: generateIncidentNumber }
+  });
+  const castVote = new CastVote();
+  const finalizeIncident = new FinalizeIncident();
+  const requestAccusedResponse = new RequestAccusedResponse();
+  const withdrawIncident = new WithdrawIncident();
   const allowedGuildId = config.allowedGuildId;
   const stewardIncidentThreadId = '1466753742002065531';
   const withdrawButtonChannelId = '1469476056611422310';
@@ -96,16 +120,6 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     fields.splice(insertIndex, 0, { name: '⚠️ Opmerking', value: note });
     newEmbed.setFields(fields);
     return { embed: newEmbed, changed: true };
-  };
-
-  const pad2 = (value) => String(value).padStart(2, '0');
-  const formatSheetTimestamp = (date = new Date()) => {
-    const year = date.getFullYear();
-    const month = pad2(date.getMonth() + 1);
-    const day = pad2(date.getDate());
-    const hours = pad2(date.getHours());
-    const minutes = pad2(date.getMinutes());
-    return `${year}-${month}-${day} - ${hours}:${minutes}`;
   };
 
   const removePendingGuiltyReply = (incidentNumber) => {
@@ -711,260 +725,42 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   };
 
   const submitIncidentReport = async (interaction, pending) => {
-    const raceName = pending.raceName;
-    const round = pending.round;
-    const corner = pending.corner;
-    const description = pending.description;
-    const evidence = 'Zie uploads/links';
-    const division = pending.division || 'Onbekend';
-
-    if (!raceName || !round || !description) {
-      return interaction.editReply({
-        content: '❌ Je melding mist gegevens. Klik op **Bewerken** en vul alles opnieuw in.'
-      });
-    }
-
-    const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
-    if (!forumChannel?.threads?.create) {
-      return interaction.editReply({
-        content: '❌ Stem-kanaal niet gevonden of is geen forum-kanaal. Check voteChannelId.'
-      });
-    }
-
     const reasonValue = pending.reasonValue;
     const reasonLabel = incidentReasons.find((r) => r.value === reasonValue)?.label || reasonValue;
-    const incidentNumber = pending.incidentNumber || generateIncidentNumber();
-
-    const guiltyDriver = pending.guiltyTag || 'Onbekend';
-    const guiltyMention = pending.guiltyId ? `<@${pending.guiltyId}>` : guiltyDriver;
-    const reporterMention = pending.reporterId ? `<@${pending.reporterId}>` : pending.reporterTag || 'Onbekend';
-
-    const maxLabelNameLength = 24;
-    const truncateLabelName = (value) => {
-      if (!value) return 'Onbekend';
-      return value.length > maxLabelNameLength ? `${value.slice(0, maxLabelNameLength - 1)}…` : value;
-    };
-    const reporterLabelName = truncateLabelName(pending.reporterTag);
-
     const stewardNote = await getStewardInvolvementNote(interaction.guild, {
       reporterId: pending.reporterId,
       guiltyId: pending.guiltyId
     });
 
-    const incidentFields = [
-      { name: '👤 Ingediend door', value: reporterMention, inline: true },
-      { name: '🏁 Divisie', value: division, inline: true },
-      { name: '🏁 Race', value: raceName, inline: true },
-      { name: '🔢 Ronde', value: round, inline: true },
-      { name: '🏁 Circuit', value: corner || 'Onbekend', inline: true },
-      { name: '⚠️ Schuldige rijder', value: guiltyMention || guiltyDriver, inline: true },
-      { name: '📌 Reden', value: reasonLabel },
-      { name: '📝 Beschrijving', value: description }
-    ];
-    if (stewardNote) {
-      incidentFields.push({ name: '⚠️ Opmerking', value: stewardNote });
-    }
-    incidentFields.push(
-      { name: '\u200b', value: '\u200b' },
-      { name: '🎥 Bewijs', value: evidence },
-      { name: '\u200b', value: '\u200b' },
-      { name: `📊 Tussenstand - ${guiltyDriver}`, value: 'Nog geen stemmen.' },
-      { name: `📊 Tussenstand - ${pending.reporterTag}`, value: 'Nog geen stemmen.' },
-      { name: `🗳️ Stemmen - ${guiltyDriver}`, value: 'Nog geen stemmen.' },
-      { name: `🗳️ Stemmen - ${pending.reporterTag}`, value: 'Nog geen stemmen.' }
-    );
-
-    const incidentEmbed = new EmbedBuilder()
-      .setColor('#FF6B00')
-      .setTitle(`🚨 Incident ${incidentNumber}`)
-      .addFields(...incidentFields)
-      .setTimestamp();
-
-    const voteButtons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_CAT_PREFIX}0`).setLabel('Cat 0').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_CAT_PREFIX}1`).setLabel('Cat 1').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_CAT_PREFIX}2`).setLabel('Cat 2').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_CAT_PREFIX}3`).setLabel('Cat 3').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_CAT_PREFIX}4`).setLabel('Cat 4').setStyle(ButtonStyle.Secondary)
-    );
-
-    const voteButtonsRow2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_CAT_PREFIX}5`).setLabel('Cat 5').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(IDS.VOTE_PLUS).setLabel('+ Strafpunt').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(IDS.VOTE_MINUS).setLabel('- Strafpunt').setStyle(ButtonStyle.Primary)
-    );
-
-    const reporterButtons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_REPORTER_CAT_PREFIX}0`).setLabel('Cat 0').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_REPORTER_CAT_PREFIX}1`).setLabel('Cat 1').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_REPORTER_CAT_PREFIX}2`).setLabel('Cat 2').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_REPORTER_CAT_PREFIX}3`).setLabel('Cat 3').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_REPORTER_CAT_PREFIX}4`).setLabel('Cat 4').setStyle(ButtonStyle.Secondary)
-    );
-
-    const reporterButtonsRow2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`${IDS.VOTE_REPORTER_CAT_PREFIX}5`).setLabel('Cat 5').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(IDS.VOTE_REPORTER_PLUS).setLabel('+ Strafpunt').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(IDS.VOTE_REPORTER_MINUS).setLabel('- Strafpunt').setStyle(ButtonStyle.Primary)
-    );
-
-    const reporterSeparatorRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('sep_indiener')
-        .setLabel(`⬆️ ${guiltyDriver} --- ${reporterLabelName} ⬇️`)
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(true)
-    );
-
-    const threadName = buildIncidentThreadName({
-      incidentNumber,
-      reporterTag: pending.reporterTag,
-      guiltyDriver
-    });
-    let thread;
     try {
-      thread = await forumChannel.threads.create({
-        name: threadName,
-        message: {
-          content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld door ${pending.reporterTag}`,
-          embeds: [incidentEmbed],
-          components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
-        }
+      const result = await createIncident.execute({
+        pending: { ...pending, reasonLabel },
+        stewardNote,
+        evidenceWindowMs,
+        guiltyReplyWindowMs,
+        fallbackEvidenceChannelId: interaction.channelId,
+        evidenceUserId: interaction.user.id,
+        pendingOwnerId: interaction.user.id
+      });
+
+      await interaction.editReply({
+        content:
+          `✅ Je incident-ticket **${result.incidentNumber}** is verzonden naar de stewards!\n` +
+          `Je hebt zojuist een DM ontvangen van de Bot. Upload of deel je bewijsmateriaal via de DM.`
       });
     } catch (err) {
-      console.warn('⚠️ Forum thread aanmaken mislukt.', {
-        voteChannelId: config.voteChannelId,
-        threadName,
-        error: err?.message,
-        code: err?.code,
-        status: err?.status
-      });
+      if (err instanceof DomainError && err.code === 'MISSING_FIELDS') {
+        return interaction.editReply({
+          content: '❌ Je melding mist gegevens. Klik op **Bewerken** en vul alles opnieuw in.'
+        });
+      }
+      if (err?.code === 'VOTE_CHANNEL_MISSING') {
+        return interaction.editReply({
+          content: '❌ Stem-kanaal niet gevonden of is geen forum-kanaal. Check voteChannelId.'
+        });
+      }
       throw err;
     }
-    let message = await thread.fetchStarterMessage().catch(() => null);
-    if (!message) {
-      message = await thread.send({
-        content: `<@&${config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${division} - ${raceName} (${round}) - Door ${pending.reporterTag}`,
-        embeds: [incidentEmbed],
-        components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
-      });
-    }
-
-    const finalizeButtons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary)
-    );
-    await thread.send({
-      content: 'Stewards: gebruik deze knop om het incident af te ronden.',
-      components: [finalizeButtons]
-    });
-
-    const sheetRowNumber = await appendIncidentRow({
-      config,
-      row: [
-        'New',
-        formatSheetTimestamp(),
-        division,
-        guiltyDriver,
-        pending.reporterTag,
-        raceName,
-        round,
-        corner || '',
-        reasonLabel,
-        description,
-        ''
-      ]
-    });
-
-    activeIncidents.set(message.id, {
-      votes: {},
-      incidentNumber,
-      division,
-      raceName,
-      round,
-      corner,
-      guiltyId: pending.guiltyId,
-      guiltyDriver,
-      reason: reasonLabel,
-      reporter: pending.reporterTag,
-      reporterId: pending.reporterId,
-      sheetRowNumber,
-      threadId: thread.id
-    });
-
-    if (sheetRowNumber) {
-      const enrichedEmbed = EmbedBuilder.from(incidentEmbed).setFooter({ text: `SheetRow:${sheetRowNumber}` });
-      try {
-        await editMessageWithRetry(
-          message,
-          { embeds: [enrichedEmbed], components: message.components },
-          'Add sheet row footer',
-          { userId: interaction.user?.id }
-        );
-      } catch {}
-    }
-
-    if (pending.guiltyId) {
-      try {
-        const guiltyUser = await client.users.fetch(pending.guiltyId).catch(() => null);
-        if (guiltyUser) {
-          const guiltyDm = await guiltyUser.createDM();
-          const reporterMention = pending.reporterId
-            ? `<@${pending.reporterId}>`
-            : `**${pending.reporterTag || 'Onbekend'}**`;
-          await guiltyDm.send(
-            'Er is een race incident ingediend door ' +
-              `${reporterMention} met het incident nummer **${incidentNumber}**.\n` +
-              `Het gaat om Race ${raceName} * Ronde ${round}.\n` +
-              'Je hebt 2 dagen de tijd om te reageren door middel van deze DM te gebruiken.\n' +
-              'De DM mag slechts één keer worden ingediend en wordt als tegenpartij als reactie geplaatst onder het incident-ticket.'
-          );
-
-          const normalizedIncident = incidentNumber.toUpperCase();
-          const userEntries = pendingGuiltyReplies.get(pending.guiltyId) || new Map();
-          userEntries.set(normalizedIncident, {
-            incidentNumber,
-            raceName,
-            round,
-            reporterTag: pending.reporterTag,
-            messageId: message.id,
-            threadId: thread.id,
-            channelId: guiltyDm.id,
-            expiresAt: Date.now() + guiltyReplyWindowMs,
-            responded: false
-          });
-          pendingGuiltyReplies.set(pending.guiltyId, userEntries);
-        }
-      } catch {}
-    }
-
-    let evidenceChannelId = interaction.channelId;
-    const botMessageIds = [];
-    try {
-      const dmChannel = await interaction.user.createDM();
-      evidenceChannelId = dmChannel.id;
-      const dmIntro = await dmChannel.send(
-        `✅ Je incident-ticket **${incidentNumber}** is verzonden naar de stewards.\n` +
-          `Upload of stuur een link van je bewijsmateriaal in deze DM binnen 10 minuten om het automatisch toe te voegen aan je melding.`
-      );
-      botMessageIds.push(dmIntro.id);
-    } catch {}
-
-    pendingEvidence.set(interaction.user.id, {
-      messageId: message.id,
-      voteThreadId: thread.id,
-      channelId: evidenceChannelId,
-      expiresAt: Date.now() + evidenceWindowMs,
-      type: 'incident',
-      incidentNumber,
-      botMessageIds
-    });
-
-    pendingIncidentReports.delete(interaction.user.id);
-    await interaction.editReply({
-      content:
-        `✅ Je incident-ticket **${incidentNumber}** is verzonden naar de stewards!\n` +
-        `Je hebt zojuist een DM ontvangen van de Bot. Upload of deel je bewijsmateriaal via de DM.`
-    });
   };
 
   const withdrawIncidentByNumber = async ({ interaction, ticketNumber, reasonText }) => {
@@ -991,26 +787,21 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     const [messageId, incidentData] = matchEntry;
-    const reporterId = incidentData.reporterId;
-    const reporterTag = incidentData.reporter;
-
-    if (interaction.user.id !== reporterId) {
-      await interaction.reply({
-        content: '❌ Alleen de indiener kan dit incident terugnemen.',
-        flags: MessageFlags.Ephemeral
+    try {
+      await withdrawIncident.execute({
+        incidentData,
+        userId: interaction.user.id,
+        userTag: interaction.user.tag
       });
-      return true;
-    }
-    const isReporter =
-      (reporterId && reporterId === interaction.user.id) ||
-      (!reporterId && reporterTag && reporterTag === interaction.user.tag);
-
-    if (!isReporter) {
-      await interaction.reply({
-        content: '❌ Alleen de melder van dit incident kan het terugnemen.',
-        flags: MessageFlags.Ephemeral
-      });
-      return true;
+    } catch (err) {
+      if (err instanceof DomainError && err.code === 'NOT_REPORTER') {
+        await interaction.reply({
+          content: '❌ Alleen de melder van dit incident kan het terugnemen.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+      throw err;
     }
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -1503,23 +1294,43 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     // 4b) Modal submit: wederwoord naar stewards
     if (interaction.customId === IDS.APPEAL_MODAL) {
       const pending = pendingAppeals.get(interaction.user.id);
-      if (!pending) {
-        await interaction.reply({ content: '❌ Geen open wederwoord gevonden. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      if (Date.now() > pending.expiresAt) {
-        pendingAppeals.delete(interaction.user.id);
-        await interaction.reply({ content: '❌ Tijd verlopen. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      if (pending.allowedGuiltyId && pending.allowedGuiltyId !== interaction.user.id) {
-        pendingAppeals.delete(interaction.user.id);
-        await interaction.reply({ content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.', flags: MessageFlags.Ephemeral });
-        return true;
-      }
-
       const incidentNumberInput = interaction.fields.getTextInputValue('incident_nummer').trim();
-      const incidentNumber = pending.incidentNumber || incidentNumberInput;
+      let incidentNumber = pending?.incidentNumber || incidentNumberInput;
+      try {
+        const validated = await requestAccusedResponse.execute({
+          mode: 'submit',
+          userId: interaction.user.id,
+          pending,
+          incidentNumberInput,
+          now: Date.now(),
+          evidenceWindowMs,
+          voteThreadId: null,
+          dmChannelId: pending?.dmChannelId,
+          appealMessageId: null,
+          validateOnly: true
+        });
+        incidentNumber = validated.incidentNumber;
+      } catch (err) {
+        if (err instanceof DomainError && err.code === 'NO_PENDING') {
+          await interaction.reply({ content: '❌ Geen open wederwoord gevonden. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        if (err instanceof DomainError && err.code === 'EXPIRED') {
+          workflowState.clearPendingAppeal(interaction.user.id);
+          await interaction.reply({ content: '❌ Tijd verlopen. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        if (err instanceof DomainError && err.code === 'NOT_ALLOWED') {
+          workflowState.clearPendingAppeal(interaction.user.id);
+          await interaction.reply({ content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        if (err instanceof DomainError && err.code === 'MISSING_INCIDENT') {
+          await interaction.reply({ content: '❌ Incidentnummer ontbreekt.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        throw err;
+      }
       const story = interaction.fields.getTextInputValue('verhaal');
       const evidenceLinks = interaction.fields.getTextInputValue('bewijs_links') || 'Geen bewijs geüpload';
 
@@ -1544,19 +1355,44 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         embeds: [appealEmbed]
       });
 
-      if (pending.dmChannelId) {
-        pendingEvidence.set(interaction.user.id, {
-          messageId: appealMessage.id,
+      try {
+        const result = await requestAccusedResponse.execute({
+          mode: 'submit',
+          userId: interaction.user.id,
+          pending,
+          incidentNumberInput,
+          now: Date.now(),
+          evidenceWindowMs,
           voteThreadId: incidentThread?.id || null,
-          channelId: pending.dmChannelId,
-          expiresAt: Date.now() + evidenceWindowMs,
-          type: 'appeal',
-          incidentNumber,
-          botMessageIds: []
+          dmChannelId: pending?.dmChannelId,
+          appealMessageId: appealMessage.id
         });
+        incidentNumber = result.incidentNumber;
+        if (result.evidencePayload) {
+          workflowState.setPendingEvidence(interaction.user.id, result.evidencePayload);
+        }
+        workflowState.clearPendingAppeal(interaction.user.id);
+      } catch (err) {
+        if (err instanceof DomainError && err.code === 'NO_PENDING') {
+          await interaction.reply({ content: '❌ Geen open wederwoord gevonden. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        if (err instanceof DomainError && err.code === 'EXPIRED') {
+          workflowState.clearPendingAppeal(interaction.user.id);
+          await interaction.reply({ content: '❌ Tijd verlopen. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        if (err instanceof DomainError && err.code === 'NOT_ALLOWED') {
+          workflowState.clearPendingAppeal(interaction.user.id);
+          await interaction.reply({ content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        if (err instanceof DomainError && err.code === 'MISSING_INCIDENT') {
+          await interaction.reply({ content: '❌ Incidentnummer ontbreekt.', flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        throw err;
       }
-
-      pendingAppeals.delete(interaction.user.id);
 
       if (pending.dmChannelId) {
         try {
@@ -1567,7 +1403,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           );
           const current = pendingEvidence.get(interaction.user.id);
           if (current) {
-            pendingEvidence.set(interaction.user.id, {
+            workflowState.setPendingEvidence(interaction.user.id, {
               ...current,
               botMessageIds: [...(current.botMessageIds || []), dmIntro.id]
             });
@@ -1725,16 +1561,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return respond({ content: '❌ Stem-bericht niet gevonden.', flags: MessageFlags.Ephemeral });
     }
 
-    const tally = buildTallyText(incidentData.votes);
-    const winner = mostVotedCategory(incidentData.votes);
-    const decision = winner ? winner.toUpperCase() : 'CAT0';
-    const penaltyPoints = computePenaltyPoints(incidentData.votes);
-    const reporterTally = buildTallyText(incidentData.votes, 'reporter');
-    const reporterWinner = mostVotedCategory(incidentData.votes, 'reporter');
-    const reporterDecision = reporterWinner ? reporterWinner.toUpperCase() : 'CAT0';
-    const reporterPenaltyPoints = computePenaltyPoints(incidentData.votes, 'reporter');
-    let finalTextValue = finalText;
-    if (decision === 'CAT0') finalTextValue = 'No futher action';
+    const {
+      tally,
+      decision,
+      penaltyPoints,
+      reporterTally,
+      reporterDecision,
+      reporterPenaltyPoints,
+      finalTextValue
+    } = await finalizeIncident.execute({ incidentData, finalText });
 
     const threadReporterLabel = await formatUserLabel(incidentData.reporter, voteChannel.guild);
     const threadGuiltyLabel = await formatUserLabel(incidentData.guiltyDriver, voteChannel.guild);
@@ -2134,20 +1969,27 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         });
         return true;
       }
-      if (interaction.user.id !== guiltyId) {
-        await interaction.reply({
-          content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.',
-          flags: MessageFlags.Ephemeral
+      try {
+        const payload = await requestAccusedResponse.execute({
+          mode: 'init',
+          userId: interaction.user.id,
+          guiltyId,
+          incidentNumberInput: incidentNumber,
+          now: Date.now(),
+          appealWindowMs
         });
-        return true;
+        workflowState.setPendingAppeal(interaction.user.id, payload);
+        await interaction.showModal(buildAppealModal({ incidentNumber }));
+      } catch (err) {
+        if (err instanceof DomainError && err.code === 'NOT_ALLOWED') {
+          await interaction.reply({
+            content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.',
+            flags: MessageFlags.Ephemeral
+          });
+          return true;
+        }
+        throw err;
       }
-      pendingAppeals.set(interaction.user.id, {
-        expiresAt: Date.now() + appealWindowMs,
-        incidentNumber,
-        allowedGuiltyId: guiltyId,
-        source: 'resolved'
-      });
-      await interaction.showModal(buildAppealModal({ incidentNumber }));
       return true;
     }
 
@@ -2442,25 +2284,21 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return true;
     }
 
-    const involvedIds = [incidentData.reporterId, incidentData.guiltyId].filter(Boolean);
-    if (involvedIds.includes(interaction.user.id)) {
-      await interaction.reply({
-        content: '❌ Je bent betrokken bij dit incident (indiener/tegenpartij) en mag daarom niet stemmen.',
-        flags: MessageFlags.Ephemeral
+    try {
+      await castVote.execute({
+        incidentData,
+        voterId: interaction.user.id,
+        action: 'validate'
       });
-      return true;
-    }
-
-    // Zorg dat gebruiker entry heeft
-    if (!incidentData.votes[interaction.user.id]) {
-      incidentData.votes[interaction.user.id] = {
-        category: null,
-        plus: false,
-        minus: false,
-        reporterCategory: null,
-        reporterPlus: false,
-        reporterMinus: false
-      };
+    } catch (err) {
+      if (err instanceof DomainError && err.code === 'VOTER_INVOLVED') {
+        await interaction.reply({
+          content: '❌ Je bent betrokken bij dit incident (indiener/tegenpartij) en mag daarom niet stemmen.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+      throw err;
     }
 
     // Afsluiten
@@ -2487,9 +2325,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     // Categorie stemmen
     if (id.startsWith(IDS.VOTE_CAT_PREFIX)) {
       const cat = `cat${id.slice(IDS.VOTE_CAT_PREFIX.length)}`;
-      const entry = incidentData.votes[interaction.user.id];
-      const isSame = entry.category === cat;
-      entry.category = isSame ? null : cat;
+      const { isSame } = await castVote.execute({
+        incidentData,
+        voterId: interaction.user.id,
+        action: 'category',
+        target: 'guilty',
+        category: cat
+      });
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2514,9 +2356,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     // Categorie stemmen (indiener)
     if (id.startsWith(IDS.VOTE_REPORTER_CAT_PREFIX)) {
       const cat = `cat${id.slice(IDS.VOTE_REPORTER_CAT_PREFIX.length)}`;
-      const entry = incidentData.votes[interaction.user.id];
-      const isSame = entry.reporterCategory === cat;
-      entry.reporterCategory = isSame ? null : cat;
+      const { isSame } = await castVote.execute({
+        incidentData,
+        voterId: interaction.user.id,
+        action: 'category',
+        target: 'reporter',
+        category: cat
+      });
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2540,9 +2386,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // + Strafpunt toggle (aan/uit)
     if (id === IDS.VOTE_PLUS) {
-      const entry = incidentData.votes[interaction.user.id];
-      entry.plus = !entry.plus;
-      if (entry.plus) entry.minus = false;
+      const { entry } = await castVote.execute({
+        incidentData,
+        voterId: interaction.user.id,
+        action: 'plus',
+        target: 'guilty'
+      });
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2564,9 +2413,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // - Strafpunt toggle (aan/uit)
     if (id === IDS.VOTE_MINUS) {
-      const entry = incidentData.votes[interaction.user.id];
-      entry.minus = !entry.minus;
-      if (entry.minus) entry.plus = false;
+      const { entry } = await castVote.execute({
+        incidentData,
+        voterId: interaction.user.id,
+        action: 'minus',
+        target: 'guilty'
+      });
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2588,9 +2440,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // + Strafpunt toggle (indiener)
     if (id === IDS.VOTE_REPORTER_PLUS) {
-      const entry = incidentData.votes[interaction.user.id];
-      entry.reporterPlus = !entry.reporterPlus;
-      if (entry.reporterPlus) entry.reporterMinus = false;
+      const { entry } = await castVote.execute({
+        incidentData,
+        voterId: interaction.user.id,
+        action: 'plus',
+        target: 'reporter'
+      });
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2612,9 +2467,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // - Strafpunt toggle (indiener)
     if (id === IDS.VOTE_REPORTER_MINUS) {
-      const entry = incidentData.votes[interaction.user.id];
-      entry.reporterMinus = !entry.reporterMinus;
-      if (entry.reporterMinus) entry.reporterPlus = false;
+      const { entry } = await castVote.execute({
+        incidentData,
+        voterId: interaction.user.id,
+        action: 'minus',
+        target: 'reporter'
+      });
 
       const updated = await updateVoteEmbed({
         interaction,
