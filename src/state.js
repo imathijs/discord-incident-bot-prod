@@ -1,15 +1,17 @@
+const path = require('node:path');
+const { JsonStore } = require('./infrastructure/persistence/JsonStore');
+
 function createState(config) {
   const autoDeleteHours = Number(config.autoDeleteHours) || 0;
   const autoDeleteMs = autoDeleteHours > 0 ? autoDeleteHours * 60 * 60 * 1000 : 0;
+  const dataDir = path.join(__dirname, '..', 'data');
+  const store = new JsonStore({
+    dataDir,
+    initialCounter: config.incidentCounter
+  });
 
   return {
-    activeIncidents: new Map(),
-    pendingEvidence: new Map(),
-    pendingIncidentReports: new Map(),
-    pendingAppeals: new Map(),
-    pendingFinalizations: new Map(),
-    pendingGuiltyReplies: new Map(),
-    pendingWithdrawals: new Map(),
+    store,
     autoDeleteMs
   };
 }

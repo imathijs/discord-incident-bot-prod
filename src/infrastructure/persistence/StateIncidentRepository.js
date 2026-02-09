@@ -1,13 +1,13 @@
 const { appendIncidentRow } = require('../../utils/sheets');
 
 class StateIncidentRepository {
-  constructor({ config, state }) {
+  constructor({ config, store }) {
     this.config = config;
-    this.state = state;
+    this.store = store;
   }
 
   async getById(id) {
-    return this.state.activeIncidents.get(id) || null;
+    return this.store.getIncident(id);
   }
 
   async save({ incident, sheetRow }) {
@@ -19,14 +19,13 @@ class StateIncidentRepository {
       });
       incident.sheetRowNumber = sheetRowNumber;
     }
-    if (incident?.id) {
-      this.state.activeIncidents.set(incident.id, incident);
-    }
-    return incident;
+    if (!incident?.status) incident.status = 'OPEN';
+    if (!incident?.createdAt) incident.createdAt = Date.now();
+    return this.store.saveIncident(incident);
   }
 
   async listOpen() {
-    return [...this.state.activeIncidents.values()];
+    return this.store.listOpenIncidents();
   }
 }
 

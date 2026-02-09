@@ -38,18 +38,10 @@ const { DiscordNotificationPort } = require('./DiscordNotificationPort');
 const { DomainError } = require('../../domain/errors/DomainError');
 
 function registerInteractionHandlers(client, { config, state, generateIncidentNumber }) {
-  const {
-    activeIncidents,
-    pendingEvidence,
-    pendingIncidentReports,
-    pendingAppeals,
-    pendingFinalizations,
-    pendingGuiltyReplies,
-    pendingWithdrawals
-  } = state;
+  const { store } = state;
 
-  const incidentRepository = new StateIncidentRepository({ config, state });
-  const workflowState = new WorkflowStateStore({ state });
+  const incidentRepository = new StateIncidentRepository({ config, store });
+  const workflowState = new WorkflowStateStore({ store });
   const notificationPort = new DiscordNotificationPort({ client, config });
   const createIncident = new CreateIncident({
     incidentRepository,
@@ -122,15 +114,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return { embed: newEmbed, changed: true };
   };
 
-  const removePendingGuiltyReply = (incidentNumber) => {
+  const removePendingGuiltyReply = async (incidentNumber) => {
     if (!incidentNumber) return;
-    const normalized = incidentNumber.toUpperCase();
-    for (const [userId, entries] of pendingGuiltyReplies.entries()) {
-      if (!entries || typeof entries.get !== 'function') continue;
-      if (entries.delete(normalized) && entries.size === 0) {
-        pendingGuiltyReplies.delete(userId);
-      }
-    }
+    await store.deletePendingGuiltyRepliesByIncident(incidentNumber);
   };
 
   const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
@@ -275,7 +261,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
   const listOpenIncidentsForUser = async (user) => {
     const items = [];
-    for (const [, incident] of activeIncidents.entries()) {
+    const openIncidents = await store.listOpenIncidents({ withVotes: true });
+    for (const incident of openIncidents) {
       const isReporter =
         (incident.reporterId && incident.reporterId === user.id) ||
         (!incident.reporterId && incident.reporter && incident.reporter === user.tag);
@@ -498,10 +485,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const { message, threadId } = found;
     const incidentData = hydrateIncidentFromMessage(message);
     if (!incidentData) return null;
-    activeIncidents.set(message.id, {
+    const incident = {
       ...incidentData,
-      threadId: threadId || message.channelId
-    });
+      id: message.id,
+      threadId: threadId || message.channelId,
+      status: 'OPEN'
+    };
+    await store.saveIncident(incident);
+    await store.setVotes(message.id, incidentData.votes || {});
     return [message.id, incidentData];
   };
 
@@ -766,12 +757,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   const withdrawIncidentByNumber = async ({ interaction, ticketNumber, reasonText }) => {
     const normalizedTicket = normalizeTicketInput(ticketNumber);
     let matchEntry = null;
-    for (const entry of activeIncidents.entries()) {
-      const incidentNumber = entry[1]?.incidentNumber || '';
-      if (incidentNumber.toUpperCase() === normalizedTicket) {
-        matchEntry = entry;
-        break;
-      }
+    const incidentFromStore = await store.getIncidentByNumber(normalizedTicket);
+    if (incidentFromStore?.id) {
+      matchEntry = [incidentFromStore.id, incidentFromStore];
     }
 
     if (!matchEntry) {
@@ -808,12 +796,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const respond = (payload) =>
       interaction.replied || interaction.deferred ? interaction.editReply(payload) : interaction.reply(payload);
 
-    for (const [userId, pending] of pendingEvidence.entries()) {
+    const pendingEvidenceEntries = await store.listPendingEvidenceEntries();
+    for (const [userId, pending] of pendingEvidenceEntries) {
       if ((pending.incidentNumber || '').toUpperCase() === normalizedTicket) {
-        pendingEvidence.delete(userId);
+        await store.deletePendingEvidence(userId);
       }
     }
-    removePendingGuiltyReply(incidentData.incidentNumber || ticketNumber);
+    await removePendingGuiltyReply(incidentData.incidentNumber || ticketNumber);
 
     const voteChannel = await fetchTextTargetChannel(client, incidentData?.threadId || config.voteChannelId);
     if (!voteChannel) {
@@ -910,7 +899,25 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }).catch(() => {});
     }
 
-    activeIncidents.delete(messageId);
+    try {
+      const dmTargets = [incidentData.guiltyId].filter(Boolean);
+      for (const userId of dmTargets) {
+        try {
+          const user = await client.users.fetch(userId).catch(() => null);
+          if (user) {
+            await user.send(
+              `Incident ticket ${incidentData.incidentNumber || 'Onbekend'} is ingetrokken door de melder.`
+            );
+          }
+        } catch {}
+      }
+    } catch {}
+
+    await store.saveIncident({
+      ...incidentData,
+      id: messageId,
+      status: 'WITHDRAWN'
+    });
     await respond({
       content: deleted
         ? `✅ Incident **${ticketNumber}** is verwijderd.`
@@ -1038,12 +1045,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const ticketNumber = interaction.options.getString('ticketnummer', true).trim();
       const normalizedTicket = normalizeTicketInput(ticketNumber);
       let matchEntry = null;
-      for (const entry of activeIncidents.entries()) {
-        const incidentNumber = entry[1]?.incidentNumber || '';
-        if (incidentNumber.toUpperCase() === normalizedTicket) {
-          matchEntry = entry;
-          break;
-        }
+      const incidentFromStore = await store.getIncidentByNumber(normalizedTicket);
+      if (incidentFromStore?.id) {
+        matchEntry = [incidentFromStore.id, incidentFromStore];
       }
 
       if (!matchEntry) {
@@ -1059,7 +1063,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const [messageId, incidentData] = matchEntry;
-      pendingFinalizations.set(interaction.user.id, {
+      await store.setPendingFinalization(interaction.user.id, {
         messageId,
         channelId: incidentData?.threadId || interaction.channelId,
         expiresAt: Date.now() + finalizeWindowMs,
@@ -1102,7 +1106,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
-      pendingWithdrawals.set(interaction.user.id, {
+      await store.setPendingWithdrawal(interaction.user.id, {
         incidentNumber: match.incidentNumber,
         expiresAt: Date.now() + 10 * 60 * 1000
       });
@@ -1120,7 +1124,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         });
         return true;
       }
-      const pending = pendingIncidentReports.get(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
       if (!pending || pending.source !== 'steward') {
         await interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
@@ -1130,7 +1134,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const selectedUser = interaction.users.get(selectedUserId);
       pending.reporterId = selectedUserId;
       pending.reporterTag = selectedUser ? selectedUser.tag : `Onbekend (${selectedUserId})`;
-      pendingIncidentReports.set(interaction.user.id, pending);
+      await store.setPendingIncidentReport(interaction.user.id, pending);
 
       const culpritSelect = new UserSelectMenuBuilder()
         .setCustomId(IDS.STEWARD_CULPRIT_SELECT)
@@ -1155,7 +1159,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         });
         return true;
       }
-      const pending = pendingIncidentReports.get(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
       if (!pending || pending.source !== 'steward') {
         await interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
@@ -1165,7 +1169,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const selectedUser = interaction.users.get(selectedUserId);
       pending.guiltyId = selectedUserId;
       pending.guiltyTag = selectedUser ? selectedUser.tag : 'Onbekend';
-      pendingIncidentReports.set(interaction.user.id, pending);
+      await store.setPendingIncidentReport(interaction.user.id, pending);
 
       const reasonRows = buildReasonRows(IDS.STEWARD_INCIDENT_REASON_PREFIX);
       await interaction.update({
@@ -1182,8 +1186,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
-      const existing = pendingIncidentReports.get(interaction.user.id);
-      pendingIncidentReports.set(interaction.user.id, {
+      const existing = await store.getPendingIncidentReport(interaction.user.id);
+      await store.setPendingIncidentReport(interaction.user.id, {
         ...(existing || {}),
         reasonValue: interaction.values[0],
         reporterTag: interaction.user.tag,
@@ -1209,7 +1213,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // 3a) User Select submit: schuldige bewaren en modal tonen
     if (interaction.isUserSelectMenu() && interaction.customId === IDS.INCIDENT_CULPRIT_SELECT) {
-      const pending = pendingIncidentReports.get(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
       if (!pending) {
         await interaction.reply({ content: '❌ Sessie verlopen. Begin opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
@@ -1221,7 +1225,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       pending.guiltyTag = selectedUser ? selectedUser.tag : 'Onbekend';
 
       // Update pending state
-      pendingIncidentReports.set(interaction.user.id, pending);
+      await store.setPendingIncidentReport(interaction.user.id, pending);
 
       await interaction.showModal(buildIncidentModal());
       return true;
@@ -1235,13 +1239,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // 4) Modal submit: review tonen
     if (interaction.customId === IDS.INCIDENT_MODAL) {
-      const pending = pendingIncidentReports.get(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
       if (!pending) {
         await interaction.reply({ content: '❌ Geen open incident gevonden. Meld opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
       }
       if (Date.now() > pending.expiresAt) {
-        pendingIncidentReports.delete(interaction.user.id);
+        await store.deletePendingIncidentReport(interaction.user.id);
         await interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
       }
@@ -1261,9 +1265,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       pending.round = round;
       pending.corner = corner;
       pending.description = description;
-      if (!pending.incidentNumber) pending.incidentNumber = generateIncidentNumber();
+      if (!pending.incidentNumber) pending.incidentNumber = await generateIncidentNumber();
       pending.expiresAt = Date.now() + incidentReportWindowMs;
-      pendingIncidentReports.set(interaction.user.id, pending);
+      await store.setPendingIncidentReport(interaction.user.id, pending);
 
       const reasonValue = pending.reasonValue;
       const reasonLabel = incidentReasons.find((r) => r.value === reasonValue)?.label || reasonValue;
@@ -1293,7 +1297,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // 4b) Modal submit: wederwoord naar stewards
     if (interaction.customId === IDS.APPEAL_MODAL) {
-      const pending = pendingAppeals.get(interaction.user.id);
+      const pending = await store.getPendingAppeal(interaction.user.id);
       const incidentNumberInput = interaction.fields.getTextInputValue('incident_nummer').trim();
       let incidentNumber = pending?.incidentNumber || incidentNumberInput;
       try {
@@ -1316,12 +1320,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           return true;
         }
         if (err instanceof DomainError && err.code === 'EXPIRED') {
-          workflowState.clearPendingAppeal(interaction.user.id);
+          await workflowState.clearPendingAppeal(interaction.user.id);
           await interaction.reply({ content: '❌ Tijd verlopen. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
           return true;
         }
         if (err instanceof DomainError && err.code === 'NOT_ALLOWED') {
-          workflowState.clearPendingAppeal(interaction.user.id);
+          await workflowState.clearPendingAppeal(interaction.user.id);
           await interaction.reply({ content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.', flags: MessageFlags.Ephemeral });
           return true;
         }
@@ -1369,21 +1373,21 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         });
         incidentNumber = result.incidentNumber;
         if (result.evidencePayload) {
-          workflowState.setPendingEvidence(interaction.user.id, result.evidencePayload);
+          await workflowState.setPendingEvidence(interaction.user.id, result.evidencePayload);
         }
-        workflowState.clearPendingAppeal(interaction.user.id);
+        await workflowState.clearPendingAppeal(interaction.user.id);
       } catch (err) {
         if (err instanceof DomainError && err.code === 'NO_PENDING') {
           await interaction.reply({ content: '❌ Geen open wederwoord gevonden. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
           return true;
         }
         if (err instanceof DomainError && err.code === 'EXPIRED') {
-          workflowState.clearPendingAppeal(interaction.user.id);
+          await workflowState.clearPendingAppeal(interaction.user.id);
           await interaction.reply({ content: '❌ Tijd verlopen. Klik opnieuw op de knop.', flags: MessageFlags.Ephemeral });
           return true;
         }
         if (err instanceof DomainError && err.code === 'NOT_ALLOWED') {
-          workflowState.clearPendingAppeal(interaction.user.id);
+          await workflowState.clearPendingAppeal(interaction.user.id);
           await interaction.reply({ content: '❌ Alleen de schuldige rijder kan dit wederwoord indienen.', flags: MessageFlags.Ephemeral });
           return true;
         }
@@ -1401,9 +1405,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             '✅ Je wederwoord is doorgestuurd naar de stewards.\n' +
               'Upload of stuur een link naar je bewijsmateriaal in dit kanaal binnen 10 minuten om het automatisch toe te voegen.'
           );
-          const current = pendingEvidence.get(interaction.user.id);
+          const current = await store.getPendingEvidence(interaction.user.id);
           if (current) {
-            workflowState.setPendingEvidence(interaction.user.id, {
+            await workflowState.setPendingEvidence(interaction.user.id, {
               ...current,
               botMessageIds: [...(current.botMessageIds || []), dmIntro.id]
             });
@@ -1421,19 +1425,19 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     if (interaction.customId === IDS.WITHDRAW_REASON_MODAL) {
-      const pending = pendingWithdrawals.get(interaction.user.id);
+      const pending = await store.getPendingWithdrawal(interaction.user.id);
       if (!pending) {
         await interaction.reply({ content: '❌ Geen open intrek-actie gevonden.', flags: MessageFlags.Ephemeral });
         return true;
       }
       if (Date.now() > pending.expiresAt) {
-        pendingWithdrawals.delete(interaction.user.id);
+        await store.deletePendingWithdrawal(interaction.user.id);
         await interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
       }
 
       const reasonText = String(interaction.fields.getTextInputValue('reden') || '').trim();
-      pendingWithdrawals.delete(interaction.user.id);
+      await store.deletePendingWithdrawal(interaction.user.id);
       return withdrawIncidentByNumber({
         interaction,
         ticketNumber: pending.incidentNumber,
@@ -1443,19 +1447,19 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // 6) Finalize modal submit: voorvertoning tonen
     if (interaction.customId === IDS.FINALIZE_MODAL) {
-      const pending = pendingFinalizations.get(interaction.user.id);
+      const pending = await store.getPendingFinalization(interaction.user.id);
       if (!pending) {
         await interaction.reply({ content: '❌ Geen open afsluiting gevonden.', flags: MessageFlags.Ephemeral });
         return true;
       }
       if (Date.now() > pending.expiresAt) {
-        pendingFinalizations.delete(interaction.user.id);
+        await store.deletePendingFinalization(interaction.user.id);
         await interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
       }
 
       if (!isSteward(interaction.member)) {
-        pendingFinalizations.delete(interaction.user.id);
+        await store.deletePendingFinalization(interaction.user.id);
         await interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', flags: MessageFlags.Ephemeral });
         return true;
       }
@@ -1464,8 +1468,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       let finalText = interaction.fields.getTextInputValue('eindoordeel').trim();
       pending.finalText = finalText;
       pending.stage = 'preview';
+      await store.setPendingFinalization(interaction.user.id, pending);
 
-      let incidentData = pending.incidentSnapshot || activeIncidents.get(pending.messageId);
+      let incidentData = pending.incidentSnapshot || (await store.getIncident(pending.messageId));
       const voteChannel = await fetchTextTargetChannel(client, pending.channelId || config.voteChannelId);
       if (!voteChannel) {
         await interaction.editReply({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
@@ -1477,7 +1482,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (!incidentData && voteMessage) {
         const recovered = hydrateIncidentFromMessage(voteMessage);
         if (recovered) {
-          activeIncidents.set(pending.messageId, recovered);
+          await store.saveIncident({ ...recovered, id: pending.messageId, status: 'OPEN' });
+          await store.setVotes(pending.messageId, recovered.votes || {});
           incidentData = recovered;
         }
       }
@@ -1542,22 +1548,23 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     const voteMessage = await voteChannel.messages.fetch(pending.messageId).catch(() => null);
-    let incidentData = activeIncidents.get(pending.messageId);
+    let incidentData = await store.getIncident(pending.messageId);
     if (!incidentData && voteMessage) {
       const recovered = hydrateIncidentFromMessage(voteMessage);
       if (recovered) {
-        activeIncidents.set(pending.messageId, recovered);
+        await store.saveIncident({ ...recovered, id: pending.messageId, status: 'OPEN' });
+        await store.setVotes(pending.messageId, recovered.votes || {});
         incidentData = recovered;
       }
     }
 
     if (!incidentData) {
-      pendingFinalizations.delete(interaction.user.id);
+      await store.deletePendingFinalization(interaction.user.id);
       return respond({ content: '❌ Incident niet gevonden of al afgehandeld.', flags: MessageFlags.Ephemeral });
     }
 
     if (!voteMessage) {
-      pendingFinalizations.delete(interaction.user.id);
+      await store.deletePendingFinalization(interaction.user.id);
       return respond({ content: '❌ Stem-bericht niet gevonden.', flags: MessageFlags.Ephemeral });
     }
 
@@ -1602,11 +1609,20 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         { userId: interaction.user?.id }
       );
     } catch {}
-    await voteMessage.reply({ embeds: [resultEmbed] });
+    const resultMessage = await voteMessage.reply({ embeds: [resultEmbed] });
 
-    activeIncidents.delete(pending.messageId);
-    removePendingGuiltyReply(incidentData.incidentNumber);
-    pendingFinalizations.delete(interaction.user.id);
+    await store.saveIncident({
+      ...incidentData,
+      id: pending.messageId,
+      status: 'FINALIZED',
+      outcome: {
+        decision,
+        finalizedAt: Date.now(),
+        publishedMessageId: resultMessage?.id || null
+      }
+    });
+    await removePendingGuiltyReply(incidentData.incidentNumber);
+    await store.deletePendingFinalization(interaction.user.id);
 
     const resolvedTargetId = config.resolvedThreadId || config.resolvedChannelId;
     void (async () => {
@@ -1791,7 +1807,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
-      pendingIncidentReports.set(interaction.user.id, {
+      await store.setPendingIncidentReport(interaction.user.id, {
         source: 'steward',
         stewardId: interaction.user.id,
         stewardTag: interaction.user.tag,
@@ -1864,8 +1880,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       };
       const division = divisionMap[divisionValue] || 'Onbekend';
 
-      const existing = pendingIncidentReports.get(interaction.user.id);
-      pendingIncidentReports.set(interaction.user.id, {
+      const existing = await store.getPendingIncidentReport(interaction.user.id);
+      await store.setPendingIncidentReport(interaction.user.id, {
         ...(existing || {}),
         division,
         reporterTag: interaction.user.tag,
@@ -1899,7 +1915,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
-      const pending = pendingIncidentReports.get(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
       if (!pending || pending.source !== 'steward') {
         await interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
@@ -1914,7 +1930,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       };
       const division = divisionMap[divisionValue] || 'Onbekend';
 
-      pendingIncidentReports.set(interaction.user.id, {
+      await store.setPendingIncidentReport(interaction.user.id, {
         ...pending,
         division,
         expiresAt: Date.now() + incidentReportWindowMs
@@ -1943,7 +1959,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         });
         return true;
       }
-      const pending = pendingIncidentReports.get(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
       if (!pending || pending.source !== 'steward') {
         await interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
@@ -1952,7 +1968,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const reasonValue = interaction.customId.split(':')[1] || '';
       pending.reasonValue = reasonValue;
       pending.expiresAt = Date.now() + incidentReportWindowMs;
-      pendingIncidentReports.set(interaction.user.id, pending);
+      await store.setPendingIncidentReport(interaction.user.id, pending);
 
       await interaction.showModal(buildIncidentModal());
       return true;
@@ -1978,7 +1994,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           now: Date.now(),
           appealWindowMs
         });
-        workflowState.setPendingAppeal(interaction.user.id, payload);
+        await workflowState.setPendingAppeal(interaction.user.id, payload);
         await interaction.showModal(buildAppealModal({ incidentNumber }));
       } catch (err) {
         if (err instanceof DomainError && err.code === 'NOT_ALLOWED') {
@@ -2001,8 +2017,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const reasonValue = interaction.customId.split(':')[1] || '';
-      const existing = pendingIncidentReports.get(interaction.user.id);
-      pendingIncidentReports.set(interaction.user.id, {
+      const existing = await store.getPendingIncidentReport(interaction.user.id);
+      await store.setPendingIncidentReport(interaction.user.id, {
         ...(existing || {}),
         reasonValue,
         reporterTag: interaction.user.tag,
@@ -2027,13 +2043,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // Bewijs-buttons in meld-kanaal + incident review
     if (id === IDS.INCIDENT_REVIEW_EDIT || id === IDS.INCIDENT_REVIEW_CONFIRM) {
-      const pending = pendingIncidentReports.get(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
       if (!pending) {
         await interaction.reply({ content: '❌ Geen open incident gevonden. Meld opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
       }
       if (Date.now() > pending.expiresAt) {
-        pendingIncidentReports.delete(interaction.user.id);
+        await store.deletePendingIncidentReport(interaction.user.id);
         await interaction.reply({ content: '❌ Tijd verlopen. Meld opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
       }
@@ -2059,7 +2075,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     if (id === evidenceButtonIds.more || id === evidenceButtonIds.done) {
-      const pending = pendingEvidence.get(interaction.user.id);
+      const pending = await store.getPendingEvidence(interaction.user.id);
       const pendingType = pending?.type || 'incident';
       if (!pending) {
         await interaction.reply({
@@ -2077,7 +2093,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       if (Date.now() > pending.expiresAt) {
-        pendingEvidence.delete(interaction.user.id);
+        await store.deletePendingEvidence(interaction.user.id);
         await interaction.reply({
           content: '❌ Tijd verlopen. Start de melding opnieuw.',
           flags: MessageFlags.Ephemeral
@@ -2089,7 +2105,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         const incidentLabel = pending.incidentNumber ? ` voor **${pending.incidentNumber}**` : '';
         pending.expiresAt = Date.now() + evidenceWindowMs;
         pending.promptMessageId = null;
-        pendingEvidence.set(interaction.user.id, pending);
+        await store.setPendingEvidence(interaction.user.id, pending);
         if (interaction.message.deletable) {
           await interaction.message.delete().catch(() => {});
         }
@@ -2104,7 +2120,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const incidentLabel = pending.incidentNumber ? ` voor **${pending.incidentNumber}**` : '';
-      pendingEvidence.delete(interaction.user.id);
+      await store.deletePendingEvidence(interaction.user.id);
       if (interaction.message.deletable) {
         await interaction.message.delete().catch(() => {});
       }
@@ -2129,18 +2145,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     if (id === IDS.FINALIZE_CONFIRM || id === IDS.FINALIZE_CANCEL || id === IDS.FINALIZE_EDIT) {
-      const pending = pendingFinalizations.get(interaction.user.id);
+      const pending = await store.getPendingFinalization(interaction.user.id);
       if (!pending || pending.stage !== 'preview') {
         await interaction.reply({ content: '❌ Geen open voorvertoning gevonden.', flags: MessageFlags.Ephemeral });
         return true;
       }
       if (Date.now() > pending.expiresAt) {
-        pendingFinalizations.delete(interaction.user.id);
+        await store.deletePendingFinalization(interaction.user.id);
         await interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', flags: MessageFlags.Ephemeral });
         return true;
       }
       if (!isSteward(interaction.member)) {
-        pendingFinalizations.delete(interaction.user.id);
+        await store.deletePendingFinalization(interaction.user.id);
         await interaction.reply({ content: '❌ Alleen stewards kunnen afsluiten!', flags: MessageFlags.Ephemeral });
         return true;
       }
@@ -2151,7 +2167,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       if (interaction.customId === IDS.FINALIZE_CANCEL) {
-        pendingFinalizations.delete(interaction.user.id);
+        await store.deletePendingFinalization(interaction.user.id);
         await interaction.update({
           content: '❌ Afhandeling geannuleerd. Start opnieuw om te bewerken.',
           components: [],
@@ -2162,7 +2178,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       const finalText = String(pending.finalText || '').trim();
       if (!finalText) {
-        pendingFinalizations.delete(interaction.user.id);
+        await store.deletePendingFinalization(interaction.user.id);
         await interaction.reply({ content: '❌ Eindoordeel ontbreekt.', flags: MessageFlags.Ephemeral });
         return true;
       }
@@ -2176,11 +2192,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     // 5) Stemmen / toggles / afsluiten
-    let incidentData = activeIncidents.get(interaction.message.id);
+    let incidentData = await store.getIncident(interaction.message.id);
     if (!incidentData) {
       const recovered = hydrateIncidentFromMessage(interaction.message);
       if (recovered) {
-        activeIncidents.set(interaction.message.id, recovered);
+        await store.saveIncident({ ...recovered, id: interaction.message.id, status: 'OPEN' });
+        await store.setVotes(interaction.message.id, recovered.votes || {});
         incidentData = recovered;
       }
     }
@@ -2215,6 +2232,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (starter) {
         const recovered = hydrateIncidentFromMessage(starter);
         if (recovered) {
+          await store.saveIncident({ ...recovered, id: starter.id, status: 'OPEN' });
+          await store.setVotes(starter.id, recovered.votes || {});
           resolvedIncident = recovered;
           resolvedMessageId = starter.id;
         }
@@ -2245,6 +2264,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (!resolvedIncident) {
         const recovered = hydrateIncidentFromMessage(interaction.message);
         if (recovered) {
+          await store.saveIncident({ ...recovered, id: interaction.message.id, status: 'OPEN' });
+          await store.setVotes(interaction.message.id, recovered.votes || {});
           resolvedIncident = recovered;
         }
       }
@@ -2257,7 +2278,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
-      pendingFinalizations.set(interaction.user.id, {
+      await store.setPendingFinalization(interaction.user.id, {
         messageId: resolvedMessageId,
         channelId: resolvedChannelId,
         expiresAt: Date.now() + finalizeWindowMs,
@@ -2303,7 +2324,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     // Afsluiten
     if (id === IDS.FINALIZE_VOTES) {
-      pendingFinalizations.set(interaction.user.id, {
+      await store.setPendingFinalization(interaction.user.id, {
         messageId: interaction.message.id,
         channelId: interaction.channelId,
         expiresAt: Date.now() + finalizeWindowMs
@@ -2332,6 +2353,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         target: 'guilty',
         category: cat
       });
+      await store.setVote(interaction.message.id, interaction.user.id, incidentData.votes[interaction.user.id]);
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2363,6 +2385,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         target: 'reporter',
         category: cat
       });
+      await store.setVote(interaction.message.id, interaction.user.id, incidentData.votes[interaction.user.id]);
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2392,6 +2415,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         action: 'plus',
         target: 'guilty'
       });
+      await store.setVote(interaction.message.id, interaction.user.id, incidentData.votes[interaction.user.id]);
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2419,6 +2443,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         action: 'minus',
         target: 'guilty'
       });
+      await store.setVote(interaction.message.id, interaction.user.id, incidentData.votes[interaction.user.id]);
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2446,6 +2471,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         action: 'plus',
         target: 'reporter'
       });
+      await store.setVote(interaction.message.id, interaction.user.id, incidentData.votes[interaction.user.id]);
 
       const updated = await updateVoteEmbed({
         interaction,
@@ -2473,6 +2499,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         action: 'minus',
         target: 'reporter'
       });
+      await store.setVote(interaction.message.id, interaction.user.id, incidentData.votes[interaction.user.id]);
 
       const updated = await updateVoteEmbed({
         interaction,

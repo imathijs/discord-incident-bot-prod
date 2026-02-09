@@ -28,7 +28,7 @@ try {
   require('dotenv').config();
 } catch {}
 
-const { config, token, generateIncidentNumber } = require('./src/config');
+const { config, token } = require('./src/config');
 const { createState } = require('./src/state');
 const { registerInteractionHandlers } = require('./src/infrastructure/discord/interaction');
 const { registerMessageHandlers } = require('./src/infrastructure/discord/message');
@@ -46,6 +46,11 @@ const client = new Client({
 });
 
 const state = createState(config);
+const generateIncidentNumber = () => state.store.nextIncidentNumber();
+
+state.store.cleanupExpiredPending().catch((err) => {
+  console.error('Pending state cleanup failed:', err?.message || err);
+});
 
 registerInteractionHandlers(client, { config, state, generateIncidentNumber });
 registerMessageHandlers(client, { config, state });

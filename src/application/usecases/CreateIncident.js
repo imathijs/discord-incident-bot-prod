@@ -38,7 +38,7 @@ class CreateIncident {
     const division = pending?.division || 'Onbekend';
     const corner = pending?.corner || '';
     const reasonLabel = pending?.reasonLabel || pending?.reasonValue || 'Onbekend';
-    const incidentNumber = pending?.incidentNumber || this.idGenerator.nextIncidentNumber();
+    const incidentNumber = pending?.incidentNumber || (await this.idGenerator.nextIncidentNumber());
 
     const reporterTag = pending?.reporterTag || 'Onbekend';
     const guiltyDriver = pending?.guiltyTag || 'Onbekend';
@@ -85,7 +85,10 @@ class CreateIncident {
       reporter: reporterTag,
       reporterId: pending?.reporterId,
       votes: {},
-      threadId
+      threadId,
+      status: 'OPEN',
+      createdAt: this.clock.now(),
+      evidence: []
     };
 
     const saved = await this.incidentRepository.save({ incident, sheetRow });
@@ -115,7 +118,7 @@ class CreateIncident {
         });
         if (dmInfo?.channelId) {
           const normalizedIncident = incidentNumber.toUpperCase();
-          this.workflowState.setPendingGuiltyReply(pending.guiltyId, normalizedIncident, {
+          await this.workflowState.setPendingGuiltyReply(pending.guiltyId, normalizedIncident, {
             incidentNumber,
             raceName,
             round,
@@ -147,7 +150,7 @@ class CreateIncident {
       } catch {}
     }
 
-    this.workflowState.setPendingEvidence(evidenceUserId, {
+    await this.workflowState.setPendingEvidence(evidenceUserId, {
       messageId,
       voteThreadId: threadId,
       channelId: evidenceChannelId,
@@ -158,7 +161,7 @@ class CreateIncident {
     });
 
     if (pendingOwnerId) {
-      this.workflowState.clearPendingIncidentReport(pendingOwnerId);
+      await this.workflowState.clearPendingIncidentReport(pendingOwnerId);
     }
 
     return { incidentNumber };

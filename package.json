@@ -5,7 +5,8 @@
   "dependencies": {
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
-    "googleapis": "^143.0.0"
+    "googleapis": "^143.0.0",
+    "proper-lockfile": "^4.1.2"
   },
   "description": "",
   "scripts": {

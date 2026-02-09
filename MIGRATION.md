@@ -1,5 +1,27 @@
 # Migration Notes
 
+**Implementation Notes (State + Persistence)**
+- Persistent state now lives in `data/`:
+  - `data/incidents.json` – incident records + workflow pending state
+  - `data/votes.json` – votes per incident
+  - `data/counters.json` – incident counter
+  - `data/audit.json` – append-only audit trail
+- JSON writes are atomic (write temp file + rename) and all read-modify-write operations are file-locked via `proper-lockfile`.
+- The in-memory Maps previously used for incidents and pending flows are replaced by a `JsonStore` in `src/infrastructure/persistence/JsonStore.js`.
+- Reset state: stop the bot, delete the `data/` directory, restart.
+- Backup: copy the entire `data/` directory.
+
+**Replaced State (Old → New)**
+- `state.activeIncidents` (Map) → `data/incidents.json` (`incidents` collection)
+- `state.pendingEvidence` (Map) → `data/incidents.json` (`workflow.pendingEvidence`)
+- `state.pendingIncidentReports` (Map) → `data/incidents.json` (`workflow.pendingIncidentReports`)
+- `state.pendingAppeals` (Map) → `data/incidents.json` (`workflow.pendingAppeals`)
+- `state.pendingFinalizations` (Map) → `data/incidents.json` (`workflow.pendingFinalizations`)
+- `state.pendingGuiltyReplies` (Map of Maps) → `data/incidents.json` (`workflow.pendingGuiltyReplies`)
+- `state.pendingWithdrawals` (Map) → `data/incidents.json` (`workflow.pendingWithdrawals`)
+- `config.json incidentCounter` → `data/counters.json` (`nextIncidentNumber`)
+- Votes stored in embeds → `data/votes.json` (`votes` per incident)
+
 **Old → New**
 - `src/handlers/interaction.js` → `src/infrastructure/discord/interaction.js`
 - `src/handlers/message.js` → `src/infrastructure/discord/message.js`

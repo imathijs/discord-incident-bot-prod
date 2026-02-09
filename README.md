@@ -63,7 +63,7 @@ De meeste instellingen staan in `config.json`:
 - `stewardRoleId` – rol-ID voor stewards
 - `incidentStewardRoleId` – rol-ID voor @Incident steward (bij teruggenomen incidenten)
 - `allowedGuildId` – server-ID waar de bot is toegestaan (laat leeg voor alle servers)
-- `incidentCounter` – teller voor incidentnummers (`INC-xxxxx`)
+- `incidentCounter` – initiele tellerseed voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – auto‑delete van DM‑berichten/opties
 - `googleSheetsEnabled` – zet Google Sheets logging aan/uit
 - `googleSheetsSpreadsheetId` – spreadsheet‑ID
@@ -101,7 +101,16 @@ Details en setup: `DISCORD_CHEATSHEET.md`.
 - `src/infrastructure/discord/DiscordNotificationPort.js` – Discord adapter (threads, embeds, DMs)
 - `src/infrastructure/persistence/` – state/sheets adapters
 - `src/constants.js` – tijdslimieten en incident‑redenen
-- `src/config.js` – config en incidentnummer‑generator
+- `src/config.js` – config loader
+
+## State & persistence
+- Persistente state staat in `data/`:
+  - `data/incidents.json`
+  - `data/votes.json`
+  - `data/counters.json`
+  - `data/audit.json`
+- Reset: stop de bot, verwijder `data/`, start opnieuw.
+- Backup: kopieer de hele `data/` directory.
 
 ## Structuur (globaal)
 - `src/domain/` – domeinmodel en regels (geen discord.js)

@@ -50,8 +50,12 @@ const safeDelete = async (msg) => {
   if (msg?.deletable) await msg.delete().catch(() => {});
 };
 
-const buildIncidentLabel = (pending, activeIncidents) =>
-  pending.incidentNumber || activeIncidents.get(pending.messageId)?.incidentNumber || 'Onbekend';
+const buildIncidentLabel = async (pending, store) => {
+  if (pending?.incidentNumber) return pending.incidentNumber;
+  if (!pending?.messageId) return 'Onbekend';
+  const incident = await store.getIncident(pending.messageId);
+  return incident?.incidentNumber || 'Onbekend';
+};
 
 const hydrateIncidentFromMessage = (message) => {
   const embed = message?.embeds?.[0];
@@ -172,17 +176,18 @@ const sendEvidenceFiles = async ({ message, pendingType, pending, incidentData, 
   });
 };
 
-const resolvePendingGuiltyEntry = async ({ message, pendingByUser, pendingGuiltyReplies }) => {
+const resolvePendingGuiltyEntry = async ({ message, pendingByUser, store }) => {
   const incidentFromMessage = extractIncidentNumber(message.content || '');
   let incidentKey = incidentFromMessage;
-  let pendingEntry = incidentKey ? pendingByUser.get(incidentKey) : null;
+  let pendingEntry = incidentKey ? pendingByUser?.[incidentKey] : null;
+  const entries = pendingByUser ? Object.entries(pendingByUser) : [];
 
   if (!pendingEntry) {
-    if (pendingByUser.size === 1) {
-      const entry = pendingByUser.entries().next().value;
+    if (entries.length === 1) {
+      const entry = entries[0];
       incidentKey = entry?.[0] || null;
       pendingEntry = entry?.[1] || null;
-    } else if (pendingByUser.size > 1) {
+    } else if (entries.length > 1) {
       await message.reply(
         '❌ Meerdere incidenten open. Vermeld het incidentnummer (bijv. INC-1234) in je reactie.'
       );
@@ -199,8 +204,9 @@ const resolvePendingGuiltyEntry = async ({ message, pendingByUser, pendingGuilty
   if (pendingEntry.channelId && pendingEntry.channelId !== message.channelId) return null;
 
   if (Date.now() > pendingEntry.expiresAt) {
-    pendingByUser.delete(incidentKey);
-    if (pendingByUser.size === 0) pendingGuiltyReplies.delete(message.author.id);
+    if (incidentKey) {
+      await store.deletePendingGuiltyReply(message.author.id, incidentKey);
+    }
     await message.reply('⏳ Reactietermijn verlopen. Neem contact op met de stewards.');
     return null;
   }
@@ -252,7 +258,7 @@ const sendGuiltyReplyToStewards = async ({
   return true;
 };
 
-const finalizeGuiltyReply = async ({ message, pendingByUser, pendingGuiltyReplies, incidentKey, pendingEntry }) => {
+const finalizeGuiltyReply = async ({ message, store, incidentKey, pendingEntry }) => {
   await message.reply(
     `✅ Je reactie is doorgestuurd naar de stewards voor incident **${
       pendingEntry.incidentNumber || incidentKey || 'Onbekend'
@@ -284,7 +290,7 @@ const isAllowedEvidenceUrl = (url) => {
 };
 
 function registerMessageHandlers(client, { config, state }) {
-  const { pendingEvidence, activeIncidents, pendingGuiltyReplies, autoDeleteMs } = state;
+  const { store, autoDeleteMs } = state;
   const incidentChatChannelId = config.incidentChatChannelId;
   const allowedGuildId = config.allowedGuildId;
   const addEvidence = new AddEvidence();
@@ -297,12 +303,12 @@ function registerMessageHandlers(client, { config, state }) {
     const allowedUrls = urls.filter(isAllowedEvidenceUrl);
     const hasEvidencePayload = message.attachments.size > 0 || allowedUrls.length > 0;
 
-    const pendingByUser = pendingGuiltyReplies.get(message.author.id);
-    if (!message.guildId && pendingByUser && typeof pendingByUser.get === 'function') {
+    const pendingByUser = await store.getPendingGuiltyRepliesByUser(message.author.id);
+    if (!message.guildId && pendingByUser) {
       const resolved = await resolvePendingGuiltyEntry({
         message,
         pendingByUser,
-        pendingGuiltyReplies
+        store
       });
       if (resolved) {
         const { incidentKey, pendingEntry } = resolved;
@@ -323,8 +329,7 @@ function registerMessageHandlers(client, { config, state }) {
 
         await finalizeGuiltyReply({
           message,
-          pendingByUser,
-          pendingGuiltyReplies,
+          store,
           incidentKey,
           pendingEntry
         });
@@ -335,7 +340,7 @@ function registerMessageHandlers(client, { config, state }) {
     if (!message.guildId) {
       const ticketInput = extractIncidentNumber(message.content || '');
       let normalizedTicket = normalizeTicketInput(ticketInput);
-      const pendingForEvidence = pendingEvidence.get(message.author.id);
+      const pendingForEvidence = await store.getPendingEvidence(message.author.id);
       const isEvidenceFlow =
         hasEvidencePayload &&
         pendingForEvidence &&
@@ -476,7 +481,7 @@ function registerMessageHandlers(client, { config, state }) {
       await safeDelete(message);
     }
 
-    const pending = pendingEvidence.get(message.author.id);
+    const pending = await store.getPendingEvidence(message.author.id);
     const pendingType = pending?.type || 'incident';
     const evidenceCheck = await addEvidence.execute({
       pending,
@@ -486,7 +491,7 @@ function registerMessageHandlers(client, { config, state }) {
     });
     if (evidenceCheck.status === 'skip') return;
     if (evidenceCheck.status === 'expired') {
-      pendingEvidence.delete(message.author.id);
+      await store.deletePendingEvidence(message.author.id);
       return;
     }
 
@@ -502,6 +507,20 @@ function registerMessageHandlers(client, { config, state }) {
     const attachmentLinks = [...message.attachments.values()].map((a) => a.url);
     const evidenceLinks = [...attachmentLinks, ...allowedUrls];
     const evidenceText = evidenceLinks.join('\n');
+    const evidenceItems = [
+      ...attachmentLinks.map((url) => ({
+        type: 'attachment',
+        url,
+        addedBy: message.author.id,
+        addedAt: Date.now()
+      })),
+      ...allowedUrls.map((url) => ({
+        type: 'link',
+        url,
+        addedBy: message.author.id,
+        addedAt: Date.now()
+      }))
+    ];
     try {
       await updateEvidenceEmbed({
         voteMessage,
@@ -510,7 +529,12 @@ function registerMessageHandlers(client, { config, state }) {
       });
     } catch {}
     try {
-      const incidentData = activeIncidents.get(pending.messageId);
+      await store.appendEvidence(pending.messageId, evidenceItems);
+    } catch (err) {
+      console.error('Evidence store update failed:', err);
+    }
+    try {
+      const incidentData = await store.getIncident(pending.messageId);
       await sendEvidenceFiles({
         message,
         pendingType,
@@ -521,7 +545,7 @@ function registerMessageHandlers(client, { config, state }) {
     } catch (err) {
       console.error('Bewijs uploaden mislukt:', err);
     }
-    const incidentLabel = buildIncidentLabel(pending, activeIncidents);
+    const incidentLabel = await buildIncidentLabel(pending, store);
     const confirmation = await message.reply(
       `✅ Bewijsmateriaal toegevoegd aan incident-ticket ${incidentLabel}.`
     );
@@ -540,14 +564,14 @@ function registerMessageHandlers(client, { config, state }) {
       prompt?.id
     ].filter(Boolean);
     if (prompt?.id) {
-      pendingEvidence.set(message.author.id, {
+      await store.setPendingEvidence(message.author.id, {
         ...pending,
         expiresAt: Date.now() + evidenceWindowMs,
         promptMessageId: prompt.id,
         botMessageIds
       });
     } else {
-      pendingEvidence.set(message.author.id, {
+      await store.setPendingEvidence(message.author.id, {
         ...pending,
         expiresAt: Date.now() + evidenceWindowMs,
         botMessageIds

@@ -15,8 +15,12 @@ class Incident {
     this.guiltyTag = props?.guiltyTag || null;
     this.votes = props?.votes || {};
     this.createdAt = props?.createdAt || null;
+    this.updatedAt = props?.updatedAt || null;
     this.sheetRowNumber = props?.sheetRowNumber || null;
     this.threadId = props?.threadId || null;
+    this.evidence = props?.evidence || [];
+    this.outcome = props?.outcome || null;
+    this.accusedResponse = props?.accusedResponse || null;
   }
 }
 

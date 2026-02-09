@@ -1,28 +1,26 @@
 class WorkflowStateStore {
-  constructor({ state }) {
-    this.state = state;
+  constructor({ store }) {
+    this.store = store;
   }
 
   setPendingEvidence(userId, payload) {
-    this.state.pendingEvidence.set(userId, payload);
+    return this.store.setPendingEvidence(userId, payload);
   }
 
   setPendingAppeal(userId, payload) {
-    this.state.pendingAppeals.set(userId, payload);
+    return this.store.setPendingAppeal(userId, payload);
   }
 
   clearPendingAppeal(userId) {
-    this.state.pendingAppeals.delete(userId);
+    return this.store.deletePendingAppeal(userId);
   }
 
   setPendingGuiltyReply(userId, incidentKey, payload) {
-    const map = this.state.pendingGuiltyReplies.get(userId) || new Map();
-    map.set(incidentKey, payload);
-    this.state.pendingGuiltyReplies.set(userId, map);
+    return this.store.setPendingGuiltyReply(userId, incidentKey, payload);
   }
 
   clearPendingIncidentReport(userId) {
-    this.state.pendingIncidentReports.delete(userId);
+    return this.store.deletePendingIncidentReport(userId);
   }
 }
 
