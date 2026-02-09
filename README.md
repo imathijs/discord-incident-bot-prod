@@ -53,7 +53,7 @@ Wat er gebeurt:
 - Als het incident nog open staat, verschijnt in het resolved kanaal een korte melding + embed met samenvatting.
 
 ## Configuratie
-De meeste instellingen staan in `config.json`:
+Niet-geheime Discord IDs staan in `config.json` (wordt bij startup schema-gevalideerd):
 - `reportChannelId` – kanaal waar de meldknop staat
 - `voteChannelId` – stewards forumkanaal met incident‑threads en stemmen
 - `stewardFinalizeChannelId` – kanaal-ID waar `/raceincident afhandelen` is toegestaan, inclusief alle threads daaronder (valt terug op `voteChannelId`)
@@ -62,12 +62,17 @@ De meeste instellingen staan in `config.json`:
 - `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
 - `stewardRoleId` – rol-ID voor stewards
 - `incidentStewardRoleId` – rol-ID voor @Incident steward (bij teruggenomen incidenten)
-- `allowedGuildId` – server-ID waar de bot is toegestaan (laat leeg voor alle servers)
 - `incidentCounter` – initiele tellerseed voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – auto‑delete van DM‑berichten/opties
 - `googleSheetsEnabled` – zet Google Sheets logging aan/uit
 - `googleSheetsSpreadsheetId` – spreadsheet‑ID
 - `googleSheetsSheetName` – tabbladnaam (sheet)
+
+Startup self-checks (fail-fast):
+- verplichte keys aanwezig en type-correct
+- Discord IDs moeten snowflakes zijn (`^\\d{16,20}$`)
+- IDs `0`, `undefined`, `null` worden geweigerd
+- Google Sheets keys/credentials worden alleen verplicht als `googleSheetsEnabled=true`
 
 ## Discord‑rechten (bot)
 Minimale rechten bij het uitnodigen van de bot (OAuth2):
@@ -88,9 +93,15 @@ Details en setup: `DISCORD_CHEATSHEET.md`.
 
 ## Environment variabelen
 - `DISCORD_TOKEN` – bot token (verplicht)
+- `ALLOWED_GUILD_ID` – verplichte guild lock voor productiegedrag
 - `GOOGLE_SERVICE_ACCOUNT_JSON` – service‑account JSON (string)
 - `GOOGLE_SERVICE_ACCOUNT_B64` – base64 van service‑account JSON
 - `GOOGLE_SERVICE_ACCOUNT_FILE` – pad naar service‑account JSON
+
+Veilig guild-default gedrag:
+- Als `ALLOWED_GUILD_ID` ontbreekt, draait de bot in **DENY-ALL** mode.
+- In DENY-ALL worden guild events en slash commands geweigerd.
+- Alleen in `NODE_ENV=development` mag fallback naar `config.json.allowedGuildId`.
 
 ## Belangrijke bestanden
 - `index.js` – entrypoint, registreert handlers
@@ -101,7 +112,8 @@ Details en setup: `DISCORD_CHEATSHEET.md`.
 - `src/infrastructure/discord/DiscordNotificationPort.js` – Discord adapter (threads, embeds, DMs)
 - `src/infrastructure/persistence/` – state/sheets adapters
 - `src/constants.js` – tijdslimieten en incident‑redenen
-- `src/config.js` – config loader
+- `src/config/index.js` – centrale config loader (env + config.json + schema)
+- `src/config/schema.js` – Joi schema-validatie
 
 ## State & persistence
 - Persistente state staat in `data/`:
@@ -142,7 +154,11 @@ Details en setup: `DISCORD_CHEATSHEET.md`.
 ## Install / Run (kort)
 1) Installeer dependencies:
    - `npm install`
-2) Zet je bot token:
-   - maak een `.env` met `DISCORD_TOKEN=...`
-3) Start de bot:
+2) Maak `.env` vanuit voorbeeld:
+   - `cp .env.example .env`
+3) Vul minimaal in `.env`:
+   - `DISCORD_TOKEN=...`
+   - `ALLOWED_GUILD_ID=...`
+4) Controleer `config.json` met je kanaal/rol IDs (geen secrets)
+5) Start de bot:
    - `node index.js`

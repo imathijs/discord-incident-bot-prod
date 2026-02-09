@@ -2523,7 +2523,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   };
 
   client.once('clientReady', () => {
-    const lockNote = allowedGuildId ? ` (locked to guild ${allowedGuildId})` : '';
+    const lockNote = allowedGuildId
+      ? ` (locked to guild ${allowedGuildId})`
+      : ' (DENY-ALL actief: zet ALLOWED_GUILD_ID in .env)';
     console.log(`✅ Bot is online als ${client.user.tag}${lockNote}`);
   });
 
@@ -2651,23 +2653,38 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
     ];
 
-    if (allowedGuildId) {
-      await client.application.commands.set([]);
-      const guild = await client.guilds.fetch(allowedGuildId).catch(() => null);
-      if (!guild) {
-        console.error(`Guild ${allowedGuildId} niet gevonden voor commando-registratie.`);
-        return;
+    await client.application.commands.set([]);
+
+    if (!allowedGuildId) {
+      for (const guild of client.guilds.cache.values()) {
+        await guild.commands.set([]).catch(() => {});
       }
-      await guild.commands.set(commands);
+      console.error(
+        'ALLOWED_GUILD_ID ontbreekt. Slash commands zijn uitgeschakeld (DENY-ALL) tot ALLOWED_GUILD_ID is gezet.'
+      );
       return;
     }
 
-    await client.application.commands.set(commands);
+    const guild = await client.guilds.fetch(allowedGuildId).catch(() => null);
+    if (!guild) {
+      console.error(`Guild ${allowedGuildId} niet gevonden voor commando-registratie.`);
+      return;
+    }
+    await guild.commands.set(commands);
   });
 
   client.on('interactionCreate', async (interaction) => {
     try {
-      if (interaction.guildId && allowedGuildId && interaction.guildId !== allowedGuildId) {
+      if (!allowedGuildId) {
+        try {
+          await interaction.reply({
+            content: '❌ Bot is vergrendeld (DENY-ALL). Steward: zet ALLOWED_GUILD_ID in de omgeving.',
+            flags: MessageFlags.Ephemeral
+          });
+        } catch {}
+        return;
+      }
+      if (interaction.guildId && interaction.guildId !== allowedGuildId) {
         try {
           await interaction.reply({
             content: '❌ Deze bot is alleen beschikbaar op de hoofdserver.',

@@ -6,6 +6,7 @@
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "googleapis": "^143.0.0",
+    "joi": "^18.0.2",
     "proper-lockfile": "^4.1.2"
   },
   "description": "",

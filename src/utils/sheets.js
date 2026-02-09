@@ -16,8 +16,8 @@ const HEADER_ROW = [
   'Steward verslag'
 ];
 
-function getCredentials() {
-  const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+function getCredentials(config) {
+  const rawJson = config?.googleServiceAccountJson;
   if (rawJson) {
     try {
       return JSON.parse(rawJson);
@@ -27,7 +27,7 @@ function getCredentials() {
     }
   }
 
-  const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_B64;
+  const b64 = config?.googleServiceAccountB64;
   if (b64) {
     try {
       const decoded = Buffer.from(b64, 'base64').toString('utf8');
@@ -38,7 +38,7 @@ function getCredentials() {
     }
   }
 
-  const filePath = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
+  const filePath = config?.googleServiceAccountFile;
   if (filePath) {
     try {
       const content = fs.readFileSync(filePath, 'utf8');
@@ -60,9 +60,9 @@ function isSheetsEnabled(config) {
   );
 }
 
-function getSheetsClient() {
+function getSheetsClient(config) {
   if (cachedClient) return cachedClient;
-  const credentials = getCredentials();
+  const credentials = getCredentials(config);
   if (!credentials) return null;
 
   const auth = new google.auth.GoogleAuth({
@@ -109,7 +109,7 @@ async function ensureHeaderRow({ client, sheetName, spreadsheetId }) {
 
 async function appendIncidentRow({ config, row }) {
   if (!isSheetsEnabled(config)) return null;
-  const client = getSheetsClient();
+  const client = getSheetsClient(config);
   if (!client) return null;
   const sheetName = toA1SheetName(config.googleSheetsSheetName);
   await ensureHeaderRow({
@@ -135,7 +135,7 @@ async function appendIncidentRow({ config, row }) {
 
 async function updateIncidentStatus({ config, rowNumber, status }) {
   if (!isSheetsEnabled(config) || !rowNumber) return false;
-  const client = getSheetsClient();
+  const client = getSheetsClient(config);
   if (!client) return false;
   const sheetName = toA1SheetName(config.googleSheetsSheetName);
 
@@ -155,7 +155,7 @@ async function updateIncidentStatus({ config, rowNumber, status }) {
 
 async function updateIncidentResolution({ config, rowNumber, status, stewardReport }) {
   if (!isSheetsEnabled(config) || !rowNumber) return false;
-  const client = getSheetsClient();
+  const client = getSheetsClient(config);
   if (!client) return false;
   const sheetName = toA1SheetName(config.googleSheetsSheetName);
 

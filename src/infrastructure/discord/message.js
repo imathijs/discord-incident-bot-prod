@@ -297,7 +297,8 @@ function registerMessageHandlers(client, { config, state }) {
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    if (message.guildId && allowedGuildId && message.guildId !== allowedGuildId) return;
+    if (!allowedGuildId) return;
+    if (message.guildId && message.guildId !== allowedGuildId) return;
 
     const urls = extractUrls(message.content);
     const allowedUrls = urls.filter(isAllowedEvidenceUrl);
