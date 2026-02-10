@@ -3,24 +3,28 @@ class WorkflowStateStore {
     this.store = store;
   }
 
+  callStore(method, ...args) {
+    return this.store[method](...args);
+  }
+
   setPendingEvidence(userId, payload) {
-    return this.store.setPendingEvidence(userId, payload);
+    return this.callStore('setPendingEvidence', userId, payload);
   }
 
   setPendingAppeal(userId, payload) {
-    return this.store.setPendingAppeal(userId, payload);
+    return this.callStore('setPendingAppeal', userId, payload);
   }
 
   clearPendingAppeal(userId) {
-    return this.store.deletePendingAppeal(userId);
+    return this.callStore('deletePendingAppeal', userId);
   }
 
   setPendingGuiltyReply(userId, incidentKey, payload) {
-    return this.store.setPendingGuiltyReply(userId, incidentKey, payload);
+    return this.callStore('setPendingGuiltyReply', userId, incidentKey, payload);
   }
 
   clearPendingIncidentReport(userId) {
-    return this.store.deletePendingIncidentReport(userId);
+    return this.callStore('deletePendingIncidentReport', userId);
   }
 }
 

@@ -2,8 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const lockfile = require('proper-lockfile');
-
-const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
+const { normalizeIncidentNumber } = require('../../utils/incidentParsing');
 
 class JsonStore {
   constructor({ dataDir, initialCounter }) {
@@ -227,27 +226,43 @@ class JsonStore {
     });
   }
 
-  async getPendingEvidence(userId) {
+  async getPendingByMap(mapKey, userId) {
     if (!userId) return null;
     const data = await this.readIncidents();
-    return data.workflow.pendingEvidence[userId] || null;
+    const map = data.workflow[mapKey] || {};
+    return map[userId] || null;
   }
 
-  async setPendingEvidence(userId, payload) {
+  async setPendingByMap(mapKey, userId, payload) {
     if (!userId) return null;
     return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      data.workflow.pendingEvidence[userId] = payload;
+      if (!data.workflow[mapKey]) data.workflow[mapKey] = {};
+      data.workflow[mapKey][userId] = payload;
       return { result: payload };
     });
   }
 
-  async deletePendingEvidence(userId) {
+  async deletePendingByMap(mapKey, userId) {
     if (!userId) return false;
     return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      if (!data.workflow.pendingEvidence[userId]) return { changed: false, result: false };
-      delete data.workflow.pendingEvidence[userId];
+      const map = data.workflow[mapKey] || {};
+      if (!map[userId]) return { changed: false, result: false };
+      delete map[userId];
+      data.workflow[mapKey] = map;
       return { result: true };
     });
+  }
+
+  async getPendingEvidence(userId) {
+    return this.getPendingByMap('pendingEvidence', userId);
+  }
+
+  async setPendingEvidence(userId, payload) {
+    return this.setPendingByMap('pendingEvidence', userId, payload);
+  }
+
+  async deletePendingEvidence(userId) {
+    return this.deletePendingByMap('pendingEvidence', userId);
   }
 
   async listPendingEvidenceEntries() {
@@ -256,95 +271,51 @@ class JsonStore {
   }
 
   async getPendingIncidentReport(userId) {
-    if (!userId) return null;
-    const data = await this.readIncidents();
-    return data.workflow.pendingIncidentReports[userId] || null;
+    return this.getPendingByMap('pendingIncidentReports', userId);
   }
 
   async setPendingIncidentReport(userId, payload) {
-    if (!userId) return null;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      data.workflow.pendingIncidentReports[userId] = payload;
-      return { result: payload };
-    });
+    return this.setPendingByMap('pendingIncidentReports', userId, payload);
   }
 
   async deletePendingIncidentReport(userId) {
-    if (!userId) return false;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      if (!data.workflow.pendingIncidentReports[userId]) return { changed: false, result: false };
-      delete data.workflow.pendingIncidentReports[userId];
-      return { result: true };
-    });
+    return this.deletePendingByMap('pendingIncidentReports', userId);
   }
 
   async getPendingAppeal(userId) {
-    if (!userId) return null;
-    const data = await this.readIncidents();
-    return data.workflow.pendingAppeals[userId] || null;
+    return this.getPendingByMap('pendingAppeals', userId);
   }
 
   async setPendingAppeal(userId, payload) {
-    if (!userId) return null;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      data.workflow.pendingAppeals[userId] = payload;
-      return { result: payload };
-    });
+    return this.setPendingByMap('pendingAppeals', userId, payload);
   }
 
   async deletePendingAppeal(userId) {
-    if (!userId) return false;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      if (!data.workflow.pendingAppeals[userId]) return { changed: false, result: false };
-      delete data.workflow.pendingAppeals[userId];
-      return { result: true };
-    });
+    return this.deletePendingByMap('pendingAppeals', userId);
   }
 
   async getPendingFinalization(userId) {
-    if (!userId) return null;
-    const data = await this.readIncidents();
-    return data.workflow.pendingFinalizations[userId] || null;
+    return this.getPendingByMap('pendingFinalizations', userId);
   }
 
   async setPendingFinalization(userId, payload) {
-    if (!userId) return null;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      data.workflow.pendingFinalizations[userId] = payload;
-      return { result: payload };
-    });
+    return this.setPendingByMap('pendingFinalizations', userId, payload);
   }
 
   async deletePendingFinalization(userId) {
-    if (!userId) return false;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      if (!data.workflow.pendingFinalizations[userId]) return { changed: false, result: false };
-      delete data.workflow.pendingFinalizations[userId];
-      return { result: true };
-    });
+    return this.deletePendingByMap('pendingFinalizations', userId);
   }
 
   async getPendingWithdrawal(userId) {
-    if (!userId) return null;
-    const data = await this.readIncidents();
-    return data.workflow.pendingWithdrawals[userId] || null;
+    return this.getPendingByMap('pendingWithdrawals', userId);
   }
 
   async setPendingWithdrawal(userId, payload) {
-    if (!userId) return null;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      data.workflow.pendingWithdrawals[userId] = payload;
-      return { result: payload };
-    });
+    return this.setPendingByMap('pendingWithdrawals', userId, payload);
   }
 
   async deletePendingWithdrawal(userId) {
-    if (!userId) return false;
-    return this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
-      if (!data.workflow.pendingWithdrawals[userId]) return { changed: false, result: false };
-      delete data.workflow.pendingWithdrawals[userId];
-      return { result: true };
-    });
+    return this.deletePendingByMap('pendingWithdrawals', userId);
   }
 
   async getPendingGuiltyRepliesByUser(userId) {

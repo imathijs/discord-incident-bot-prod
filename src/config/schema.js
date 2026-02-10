@@ -2,6 +2,8 @@ const Joi = require('joi');
 
 const DISCORD_SNOWFLAKE_PATTERN = /^\d{16,20}$/;
 const RESERVED_ID_VALUES = new Set(['0', 'undefined', 'null']);
+const DEFAULT_STEWARD_INCIDENT_THREAD_ID = '1466753742002065531';
+const DEFAULT_WITHDRAW_BUTTON_CHANNEL_ID = '1469476056611422310';
 
 function isReservedId(value) {
   return RESERVED_ID_VALUES.has(String(value || '').trim().toLowerCase());
@@ -36,6 +38,8 @@ const configSchema = Joi.object({
   reportChannelId: snowflakeId.required(),
   voteChannelId: snowflakeId.required(),
   stewardFinalizeChannelId: optionalSnowflakeId,
+  stewardIncidentThreadId: optionalSnowflakeId,
+  withdrawButtonChannelId: optionalSnowflakeId,
   stewardRoleId: snowflakeId.required(),
   incidentStewardRoleId: snowflakeId.required(),
   autoDeleteHours: Joi.number().integer().min(0).required(),
@@ -72,6 +76,8 @@ const configSchema = Joi.object({
     const normalized = {
       ...value,
       stewardFinalizeChannelId: value.stewardFinalizeChannelId || value.voteChannelId,
+      stewardIncidentThreadId: value.stewardIncidentThreadId || DEFAULT_STEWARD_INCIDENT_THREAD_ID,
+      withdrawButtonChannelId: value.withdrawButtonChannelId || DEFAULT_WITHDRAW_BUTTON_CHANNEL_ID,
       resolvedThreadId: value.resolvedThreadId || value.resolvedChannelId
     };
 
@@ -98,5 +104,7 @@ const configSchema = Joi.object({
 
 module.exports = {
   configSchema,
-  DISCORD_SNOWFLAKE_PATTERN
+  DISCORD_SNOWFLAKE_PATTERN,
+  DEFAULT_STEWARD_INCIDENT_THREAD_ID,
+  DEFAULT_WITHDRAW_BUTTON_CHANNEL_ID
 };

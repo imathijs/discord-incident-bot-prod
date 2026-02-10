@@ -5,45 +5,20 @@ const { fetchTextTargetChannel } = require('../../utils/channels');
 const { editMessageWithRetry } = require('../../utils/messages');
 const { AddEvidence } = require('../../application/usecases/AddEvidence');
 const { buildEvidencePromptRow } = require('./evidenceUI');
+const {
+  normalizeIncidentNumber,
+  extractIncidentNumberFromText,
+  normalizeTicketInput,
+  getEmbedFieldValue,
+  extractIncidentNumberFromEmbed,
+  extractUserIdFromText
+} = require('../../utils/incidentParsing');
 
 const extractUrls = (content = '') => {
   const matches = content.match(/https?:\/\/\S+/gi) || [];
   return matches
     .map((url) => url.replace(/[),.;:]+$/g, ''))
     .filter(Boolean);
-};
-
-const extractIncidentNumber = (content = '') => {
-  const match = content.match(/INC-\d+/i);
-  return match ? match[0].toUpperCase() : null;
-};
-
-const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
-const normalizeTicketInput = (value) => {
-  const normalized = normalizeIncidentNumber(value);
-  if (!normalized) return '';
-  if (normalized.startsWith('INC-')) return normalized;
-  if (/^\d+$/.test(normalized)) return `INC-${normalized}`;
-  return normalized;
-};
-
-const getEmbedFieldValue = (embed, name) => {
-  const fields = embed?.fields || [];
-  const match = fields.find((field) => field.name === name);
-  return match?.value ? String(match.value).trim() : '';
-};
-
-const extractIncidentNumberFromEmbed = (embed) => {
-  const fromField = getEmbedFieldValue(embed, '🔢 Incidentnummer');
-  if (fromField) return fromField;
-  const title = embed?.title || '';
-  const match = String(title).match(/INC-\d+/i);
-  return match ? match[0].toUpperCase() : '';
-};
-
-const extractUserIdFromText = (value) => {
-  const match = String(value || '').match(/<@!?(\d+)>/);
-  return match ? match[1] : null;
 };
 
 const safeDelete = async (msg) => {
@@ -79,7 +54,7 @@ const findIncidentThreadByNumber = async (client, config, normalizedTicket) => {
   const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
   if (!forumChannel?.threads?.fetchActive) return null;
   const matchesTicket = (thread) => {
-    const threadIncident = extractIncidentNumber(thread?.name || '');
+    const threadIncident = extractIncidentNumberFromText(thread?.name || '');
     return threadIncident === normalizedTicket || (thread?.name || '').toUpperCase().includes(normalizedTicket);
   };
 
@@ -177,7 +152,7 @@ const sendEvidenceFiles = async ({ message, pendingType, pending, incidentData, 
 };
 
 const resolvePendingGuiltyEntry = async ({ message, pendingByUser, store }) => {
-  const incidentFromMessage = extractIncidentNumber(message.content || '');
+  const incidentFromMessage = extractIncidentNumberFromText(message.content || '');
   let incidentKey = incidentFromMessage;
   let pendingEntry = incidentKey ? pendingByUser?.[incidentKey] : null;
   const entries = pendingByUser ? Object.entries(pendingByUser) : [];
@@ -234,12 +209,13 @@ const sendGuiltyReplyToStewards = async ({
   const isReporter = incidentData?.reporterId && incidentData.reporterId === authorId;
   const isGuilty = incidentData?.guiltyId && incidentData.guiltyId === authorId;
   const responseColor = isReporter ? '#2ECC71' : isGuilty ? '#E67E22' : '#F1C40F';
-  const responseRoleLabel = isReporter ? 'Indiener' : isGuilty ? 'Tegenpartij' : 'Onbekend';
+  const responseRoleLabel = isReporter ? 'Indiener' : isGuilty ? 'Tegenpartij' : null;
 
+  const roleTag = responseRoleLabel ? ` (${responseRoleLabel})` : '';
   const responseEmbed = new EmbedBuilder()
     .setColor(responseColor)
     .setTitle(
-      `🗣️ Reactie (${responseRoleLabel}) ${message.author.tag} - ${
+      `🗣️ Reactie${roleTag} ${message.author.tag} - ${
         pendingEntry.incidentNumber || incidentKey || 'Onbekend'
       }`
     )
@@ -339,7 +315,7 @@ function registerMessageHandlers(client, { config, state }) {
     }
 
     if (!message.guildId) {
-      const ticketInput = extractIncidentNumber(message.content || '');
+      const ticketInput = extractIncidentNumberFromText(message.content || '');
       let normalizedTicket = normalizeTicketInput(ticketInput);
       const pendingForEvidence = await store.getPendingEvidence(message.author.id);
       const isEvidenceFlow =

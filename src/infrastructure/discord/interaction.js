@@ -26,6 +26,14 @@ const { buildEvidencePromptRow } = require('./evidenceUI');
 const { updateIncidentStatus, updateIncidentResolution } = require('../../utils/sheets');
 const { fetchTextTargetChannel, canSendToChannel } = require('../../utils/channels');
 const { editMessageWithRetry } = require('../../utils/messages');
+const {
+  normalizeIncidentNumber,
+  extractIncidentNumberFromText,
+  normalizeTicketInput,
+  getEmbedFieldValue,
+  extractIncidentNumberFromEmbed,
+  extractUserIdFromText
+} = require('../../utils/incidentParsing');
 const IDS = require('../../ids');
 const { CreateIncident } = require('../../application/usecases/CreateIncident');
 const { CastVote } = require('../../application/usecases/CastVote');
@@ -55,8 +63,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   const requestAccusedResponse = new RequestAccusedResponse();
   const withdrawIncident = new WithdrawIncident();
   const allowedGuildId = config.allowedGuildId;
-  const stewardIncidentThreadId = '1466753742002065531';
-  const withdrawButtonChannelId = '1469476056611422310';
+  const stewardIncidentThreadId = config.stewardIncidentThreadId;
+  const withdrawButtonChannelId = config.withdrawButtonChannelId;
   const stewardFinalizeChannelId = config.stewardFinalizeChannelId || config.voteChannelId;
   const isFinalizeChannelOrThread = (channel) => {
     if (!channel) return false;
@@ -117,37 +125,6 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   const removePendingGuiltyReply = async (incidentNumber) => {
     if (!incidentNumber) return;
     await store.deletePendingGuiltyRepliesByIncident(incidentNumber);
-  };
-
-  const normalizeIncidentNumber = (value) => String(value || '').trim().toUpperCase();
-  const extractIncidentNumberFromText = (value) => {
-    const match = String(value || '').match(/INC-\d+/i);
-    return match ? match[0].toUpperCase() : '';
-  };
-  const normalizeTicketInput = (value) => {
-    const normalized = normalizeIncidentNumber(value);
-    if (!normalized) return '';
-    if (normalized.startsWith('INC-')) return normalized;
-    if (/^\d+$/.test(normalized)) return `INC-${normalized}`;
-    return normalized;
-  };
-
-  const getEmbedFieldValue = (embed, name) => {
-    const fields = embed?.fields || [];
-    const match = fields.find((field) => field.name === name);
-    return match?.value ? String(match.value).trim() : '';
-  };
-
-  const extractIncidentNumberFromEmbed = (embed) => {
-    const fromField = getEmbedFieldValue(embed, '🔢 Incidentnummer');
-    if (fromField) return fromField;
-    const title = embed?.title || '';
-    return extractIncidentNumberFromText(title);
-  };
-
-  const extractUserIdFromText = (value) => {
-    const match = String(value || '').match(/<@!?(\d+)>/);
-    return match ? match[1] : null;
   };
 
   const formatUserLabel = async (value, guild) => {
@@ -811,6 +788,19 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     const voteMessage = await voteChannel.messages.fetch(messageId).catch(() => null);
+    const removeFinalizeMessage = async () => {
+      if (!voteChannel?.messages?.fetch) return;
+      const recent = await voteChannel.messages.fetch({ limit: 50 }).catch(() => null);
+      if (!recent?.size) return;
+      const toDelete = recent.filter((msg) =>
+        msg.components?.some((row) => row.components?.some((c) => c.customId === IDS.FINALIZE_VOTES))
+      );
+      for (const msg of toDelete.values()) {
+        if (msg.deletable) {
+          await msg.delete().catch(() => {});
+        }
+      }
+    };
     const isResolved = voteChannel?.isThread?.() ? await threadHasResolution(voteChannel) : false;
     if (isResolved) {
       if (voteChannel?.isThread?.()) {
@@ -828,6 +818,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     if (voteMessage?.deletable) {
       await voteMessage.delete().catch(() => {});
       deleted = true;
+    }
+    if (voteChannel?.isThread?.()) {
+      await removeFinalizeMessage();
     }
 
     if (!deleted && voteMessage) {

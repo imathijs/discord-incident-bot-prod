@@ -120,6 +120,12 @@ function buildCandidateConfig({ env, fileConfig }) {
     stewardFinalizeChannelId: normalizeOptionalString(
       pickValue(envString(env, 'STEWARD_FINALIZE_CHANNEL_ID'), fileConfig.stewardFinalizeChannelId)
     ),
+    stewardIncidentThreadId: normalizeOptionalString(
+      pickValue(envString(env, 'STEWARD_INCIDENT_THREAD_ID'), fileConfig.stewardIncidentThreadId)
+    ),
+    withdrawButtonChannelId: normalizeOptionalString(
+      pickValue(envString(env, 'WITHDRAW_BUTTON_CHANNEL_ID'), fileConfig.withdrawButtonChannelId)
+    ),
     stewardRoleId: pickValue(envStringOrUndefined(env, 'STEWARD_ROLE_ID'), fileConfig.stewardRoleId),
     incidentStewardRoleId: pickValue(
       envStringOrUndefined(env, 'INCIDENT_STEWARD_ROLE_ID'),
