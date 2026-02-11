@@ -105,6 +105,27 @@ const findIncidentMessageByNumber = async (client, config, normalizedTicket, max
   return null;
 };
 
+const resolveStewardReplyChannel = async ({
+  client,
+  config,
+  preferredChannelId,
+  incidentNumber
+}) => {
+  const preferred = await fetchTextTargetChannel(client, preferredChannelId);
+  if (preferred?.isThread?.()) return preferred;
+
+  const normalizedIncident = normalizeIncidentNumber(incidentNumber);
+  if (normalizedIncident) {
+    const found = await findIncidentMessageByNumber(client, config, normalizedIncident);
+    if (found?.threadId) {
+      const resolvedThread = await fetchTextTargetChannel(client, found.threadId);
+      if (resolvedThread?.isThread?.()) return resolvedThread;
+    }
+  }
+
+  return null;
+};
+
 const updateEvidenceEmbed = async ({ voteMessage, evidenceText, authorId }) => {
   const embed = EmbedBuilder.from(voteMessage.embeds[0]);
   const fields = embed.data.fields ?? [];
@@ -152,12 +173,16 @@ const sendEvidenceFiles = async ({ message, pendingType, pending, incidentData, 
 };
 
 const resolvePendingGuiltyEntry = async ({ message, pendingByUser, store }) => {
-  const incidentFromMessage = extractIncidentNumberFromText(message.content || '');
+  const incidentFromMessage = normalizeIncidentNumber(extractIncidentNumberFromText(message.content || ''));
   let incidentKey = incidentFromMessage;
   let pendingEntry = incidentKey ? pendingByUser?.[incidentKey] : null;
   const entries = pendingByUser ? Object.entries(pendingByUser) : [];
 
   if (!pendingEntry) {
+    if (incidentFromMessage) {
+      await message.reply('❌ Geen open wederwoord gevonden voor dit incidentnummer.');
+      return null;
+    }
     if (entries.length === 1) {
       const entry = entries[0];
       incidentKey = entry?.[0] || null;
@@ -282,6 +307,15 @@ function registerMessageHandlers(client, { config, state }) {
 
     const pendingByUser = await store.getPendingGuiltyRepliesByUser(message.author.id);
     if (!message.guildId && pendingByUser) {
+      const incidentFromMessage = extractIncidentNumberFromText(message.content || '');
+      if (!incidentFromMessage) {
+        await message.reply(
+          '❌ Incidentnummer ontbreekt. Stuur je reactie met het incidentnummer, bijvoorbeeld:\n' +
+            '`INC-1234 Mijn verhaal over het incident...`'
+        );
+        return;
+      }
+
       const resolved = await resolvePendingGuiltyEntry({
         message,
         pendingByUser,
@@ -289,7 +323,33 @@ function registerMessageHandlers(client, { config, state }) {
       });
       if (resolved) {
         const { incidentKey, pendingEntry } = resolved;
-        const voteChannel = await fetchTextTargetChannel(client, pendingEntry.threadId || config.voteChannelId);
+        const normalizedIncident = normalizeTicketInput(incidentKey || pendingEntry.incidentNumber);
+        const found = normalizedIncident
+          ? await findIncidentMessageByNumber(client, config, normalizedIncident)
+          : null;
+        if (!found?.message) {
+          await message.reply('❌ Incidentnummer niet gevonden. Controleer of het klopt.');
+          return;
+        }
+        const incidentData = hydrateIncidentFromMessage(found.message);
+        if (!incidentData) {
+          await message.reply('❌ Incidentgegevens niet gevonden. Neem contact op met de stewards.');
+          return;
+        }
+        const allowed =
+          (incidentData.guiltyId && incidentData.guiltyId === message.author.id) ||
+          (incidentData.reporterId && incidentData.reporterId === message.author.id);
+        if (!allowed) {
+          await message.reply('❌ Alleen de melder of de schuldige rijder kan op dit incident reageren.');
+          return;
+        }
+
+        const voteChannel = await resolveStewardReplyChannel({
+          client,
+          config,
+          preferredChannelId: pendingEntry.threadId || found.threadId,
+          incidentNumber: incidentData.incidentNumber || pendingEntry.incidentNumber || incidentKey
+        });
         if (!voteChannel) {
           await message.reply('❌ Steward-kanaal niet gevonden. Probeer later opnieuw.');
           return;
@@ -300,7 +360,8 @@ function registerMessageHandlers(client, { config, state }) {
           pendingEntry,
           incidentKey,
           voteChannel,
-          stewardRoleId: config.stewardRoleId
+          stewardRoleId: config.stewardRoleId,
+          incidentData
         });
         if (!sent) return;
 
@@ -377,7 +438,12 @@ function registerMessageHandlers(client, { config, state }) {
         return;
       }
 
-      const voteChannel = await fetchTextTargetChannel(client, found.threadId || config.voteChannelId);
+      const voteChannel = await resolveStewardReplyChannel({
+        client,
+        config,
+        preferredChannelId: found.threadId,
+        incidentNumber: normalizedTicket
+      });
       if (!voteChannel) {
         await message.reply('❌ Steward-kanaal niet gevonden. Probeer later opnieuw.');
         return;
