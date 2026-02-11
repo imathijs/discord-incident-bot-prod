@@ -67,6 +67,51 @@ class DiscordNotificationPort {
     return { reporterSeparatorRow, reporterButtons, reporterButtonsRow2 };
   }
 
+  buildFinalizeCheatsheetEmbed() {
+    const sections = [
+      '**Categorie 0**',
+      '- Race incident',
+      '- Niet racen maar op de baan blijven',
+      '- Expres leaven / rage quit',
+      '- Respawnen in pits (kwalificatie)',
+      '- Getunede auto / drivers agreement schenden',
+      '- Onsportief gedrag (spookrijden, wallride, etc.)',
+      '',
+      '**Categorie 1**',
+      '- Agressief aanvallen (zonder positie verlies)',
+      '- Blauwe vlag negeren',
+      '- Niet op omgeving letten',
+      '- Herhaaldelijk aantikken',
+      '- Penalty burnen op racelijn',
+      '- Slechte aansluiting rollende start (>3 lengtes)',
+      '',
+      '**Categorie 2**',
+      '- Agressief aanvallen / verdedigen',
+      '- Van baan drukken / geen ruimte laten',
+      '- Onveilig terugkomen op baan',
+      '- Opzettelijk hinderen (kwalificatie)',
+      '',
+      '**Categorie 3**',
+      '- Iemand van baan afrijden',
+      '- Startprocedures niet naleven',
+      '- Incident tijdens formatieronde',
+      '- Ghosten > 2 ronden',
+      '',
+      '**Categorie 4**',
+      '- Kettingbotsing veroorzaken',
+      '- Expres iemand van baan rijden',
+      '',
+      '**Categorie 5**',
+      '- Startincident verhoogd naar cat 5',
+      '- Verbaal aanvallen / discriminatie'
+    ];
+
+    return new EmbedBuilder()
+      .setColor('#8712ee')
+      .setTitle('📚 Cheatsheet')
+      .setDescription(sections.join('\n'));
+  }
+
   buildIncidentEmbed({
     incidentNumber,
     division,
@@ -204,7 +249,7 @@ class DiscordNotificationPort {
       new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary)
     );
     await thread.send({
-      content: 'Stewards: gebruik deze knop om het incident af te ronden.',
+      embeds: [this.buildFinalizeCheatsheetEmbed()],
       components: [finalizeButtons]
     });
 
