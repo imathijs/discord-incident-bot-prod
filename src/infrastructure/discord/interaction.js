@@ -165,7 +165,68 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return votes;
   };
 
-  const buildFinalizeModal = ({ finalText } = {}) => {
+  const getDecisionColor = (decision) => {
+    const normalized = String(decision || '').trim().toUpperCase();
+    const catColors = {
+      CAT0: '#FFFFFF',
+      CAT1: '#FFD6D6',
+      CAT2: '#FDE68A',
+      CAT3: '#FDBA74',
+      CAT4: '#F97316',
+      CAT5: '#EF4444'
+    };
+    return catColors[normalized] || '#1068ec';
+  };
+
+  const getCatLevel = (decision) => {
+    const normalized = String(decision || '').trim().toUpperCase();
+    const match = normalized.match(/^CAT([0-5])$/);
+    if (!match) return null;
+    return Number(match[1]);
+  };
+
+  const toCatLabel = (level) => {
+    if (!Number.isInteger(level)) return null;
+    if (level < 0 || level > 5) return null;
+    return `CAT${level}`;
+  };
+
+  const getEffectiveDecisionForSanction = ({ decision, penaltyPoints }) => {
+    const base = getCatLevel(decision);
+    if (base === null) return String(decision || '').trim().toUpperCase();
+    const offset = Number(penaltyPoints) || 0;
+    const adjusted = Math.min(5, Math.max(0, base + offset));
+    return toCatLabel(adjusted);
+  };
+
+  const formatDecisionWithShift = ({ decision, penaltyPoints }) => {
+    const normalized = String(decision || '').trim().toUpperCase();
+    const effective = getEffectiveDecisionForSanction({ decision: normalized, penaltyPoints });
+    if (!normalized || normalized === effective) return normalized || 'Onbekend';
+    return `${normalized} (straf als ${effective})`;
+  };
+
+  const getSanctionText = ({ decision, penaltyPoints, cat0Outcome }) => {
+    const normalized = getEffectiveDecisionForSanction({ decision, penaltyPoints });
+    switch (normalized) {
+      case 'CAT0':
+        return String(cat0Outcome || 'No further action').trim();
+      case 'CAT1':
+        return '1 strafpunt';
+      case 'CAT2':
+        return '15 seconden tijdstraf + 2 strafpunten';
+      case 'CAT3':
+        return '30 seconden tijdstraf + 3 strafpunten';
+      case 'CAT4':
+        return '45 seconden tijdstraf + 4 strafpunten';
+      case 'CAT5':
+        return '60 seconden tijdstraf + 5 strafpunten';
+      default:
+        return `${penaltyPoints ?? 0} strafpunten`;
+    }
+  };
+
+  const buildFinalizeModal = ({ finalText, cat0Outcome } = {}) => {
     const modal = new ModalBuilder()
       .setCustomId(IDS.FINALIZE_MODAL)
       .setTitle('Eindoordeel toevoegen');
@@ -181,7 +242,21 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       decisionInput.setValue(finalText);
     }
 
-    modal.addComponents(new ActionRowBuilder().addComponents(decisionInput));
+    const cat0Input = new TextInputBuilder()
+      .setCustomId('cat0_uitkomst')
+      .setLabel('CAT0 extra uitkomst (optioneel)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(100)
+      .setPlaceholder('No further action | Volgende race achteraan | DSQ | DSQ + 4 strafpunten');
+    if (cat0Outcome) {
+      cat0Input.setValue(cat0Outcome);
+    }
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(decisionInput),
+      new ActionRowBuilder().addComponents(cat0Input)
+    );
     return modal;
   };
 
@@ -1459,7 +1534,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       let finalText = interaction.fields.getTextInputValue('eindoordeel').trim();
+      const cat0Outcome = String(interaction.fields.getTextInputValue('cat0_uitkomst') || '').trim();
       pending.finalText = finalText;
+      pending.cat0Outcome = cat0Outcome;
       pending.stage = 'preview';
       await store.setPendingFinalization(interaction.user.id, pending);
 
@@ -1507,6 +1584,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           { name: '📌 Reden', value: incidentData?.reason || 'Onbekend', inline: false }
         )
         .setFooter({ text: 'Controleer de opmaak. Bevestig om te publiceren.' });
+
+      if (cat0Outcome) {
+        previewEmbed.addFields({ name: '🧩 CAT0 extra uitkomst', value: cat0Outcome });
+      }
 
       if (tally) {
         previewEmbed.addFields({ name: '📊 Stemresultaat (Dader)', value: `\`\`\`\n${tally}\n\`\`\`` });
@@ -1570,11 +1651,23 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       reporterPenaltyPoints,
       finalTextValue
     } = await finalizeIncident.execute({ incidentData, finalText });
+    const cat0Outcome = String(pending.cat0Outcome || '').trim();
+    const daderSanction = getSanctionText({ decision, penaltyPoints, cat0Outcome });
+    const reporterSanction = getSanctionText({
+      decision: reporterDecision,
+      penaltyPoints: reporterPenaltyPoints,
+      cat0Outcome: ''
+    });
+    const daderDecisionDisplay = formatDecisionWithShift({ decision, penaltyPoints });
+    const reporterDecisionDisplay = formatDecisionWithShift({
+      decision: reporterDecision,
+      penaltyPoints: reporterPenaltyPoints
+    });
 
     const threadReporterLabel = await formatUserLabel(incidentData.reporter, voteChannel.guild);
     const threadGuiltyLabel = await formatUserLabel(incidentData.guiltyDriver, voteChannel.guild);
     const resultEmbed = new EmbedBuilder()
-      .setColor('#00FF00')
+      .setColor(getDecisionColor(decision))
       .setTitle('✅ Steward Besluit')
       .setDescription(
         `👤 Ingediend door: ${threadReporterLabel || 'Onbekend'}\n\n` +
@@ -1586,11 +1679,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         { name: '🏁 Race', value: incidentData.raceName, inline: true },
         { name: '⚠️ Rijder', value: threadGuiltyLabel || 'Onbekend', inline: true },
         { name: '📊 Stemresultaat (Dader)', value: `\`\`\`\n${tally}\n\`\`\`` },
-        { name: '⚖️ Eindoordeel (Dader)', value: `**${decision}**`, inline: true },
-        { name: '🎯 Strafpunten (Dader)', value: `**${penaltyPoints}**`, inline: true },
+        { name: '⚖️ Besluit (Dader)', value: `**${daderDecisionDisplay}**`, inline: true },
+        { name: '🚨 Straf (Dader)', value: `**${daderSanction}**`, inline: true },
         { name: '📊 Stemresultaat (Indiener)', value: `\`\`\`\n${reporterTally}\n\`\`\`` },
-        { name: '⚖️ Eindoordeel (Indiener)', value: `**${reporterDecision}**`, inline: true },
-        { name: '🎯 Strafpunten (Indiener)', value: `**${reporterPenaltyPoints}**`, inline: true }
+        { name: '⚖️ Besluit (Indiener)', value: `**${reporterDecisionDisplay}**`, inline: true },
+        { name: '🚨 Straf (Indiener)', value: `**${reporterSanction}**`, inline: true }
       )
       .setTimestamp();
 
@@ -1638,20 +1731,41 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           }
           const reporterLabel = await formatUserLabel(incidentData.reporter, resolvedChannel.guild);
           const guiltyLabel = await formatUserLabel(incidentData.guiltyDriver, resolvedChannel.guild);
+          const finalTextRaw = String(finalTextValue || '').trim() || '*Geen eindoordeel ingevuld*';
+          const fieldMax = 1024;
+          const finalTextChunks = [];
+          for (let i = 0; i < finalTextRaw.length; i += fieldMax) {
+            finalTextChunks.push(finalTextRaw.slice(i, i + fieldMax));
+          }
+          const finalDecisionFields =
+            finalTextChunks.length > 0
+              ? finalTextChunks.map((chunk, idx) => ({
+                  name: idx === 0 ? '📝 Eindoordeel' : '📝 Eindoordeel (vervolg)',
+                  value: chunk
+                }))
+              : [{ name: '📝 Eindoordeel', value: '*Geen eindoordeel ingevuld*' }];
           const reportEmbed = new EmbedBuilder()
-            .setColor('#2ECC71')
+            .setColor(getDecisionColor(decision))
             .setTitle(
               `Incident ${incidentData.incidentNumber || 'Onbekend'} - ` +
                 `${reporterLabel || 'Onbekend'} vs ${guiltyLabel || 'Onbekend'}`
             )
-            .setDescription(`Status: AFGEHANDELD.\n\nUitslag van het stewardsoverleg.\n\n**Eindoordeel**\n${finalTextValue}`)
+            .setDescription('Status: **AFGEHANDELD**\n\nUitslag van het stewardsoverleg.')
             .addFields(
+              { name: '\u200b', value: '\u200b' },
+              ...finalDecisionFields,
               { name: '\u200b', value: '\u200b' },
               {
                 name: '⚖️ Besluit',
                 value:
-                  `Dader: **${decision}**  •  Strafmaat: **${penaltyPoints}**\n` +
-                  `Indiener: **${reporterDecision}**  •  Strafmaat: **${reporterPenaltyPoints}**`
+                  `Dader: **${daderDecisionDisplay}**\n` +
+                  `Indiener: **${reporterDecisionDisplay}**`
+              },
+              {
+                name: '🚨 Straf',
+                value:
+                  `Dader: **${daderSanction}**\n` +
+                  `Indiener: **${reporterSanction}**`
               },
               { name: '\u200b', value: '\u200b' },
               {
@@ -2155,7 +2269,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       if (interaction.customId === IDS.FINALIZE_EDIT) {
-        await interaction.showModal(buildFinalizeModal({ finalText: pending.finalText || '' }));
+        await interaction.showModal(
+          buildFinalizeModal({
+            finalText: pending.finalText || '',
+            cat0Outcome: pending.cat0Outcome || ''
+          })
+        );
         return true;
       }
 
