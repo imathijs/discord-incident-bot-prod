@@ -19,6 +19,7 @@ module.exports = {
   INCIDENT_REVIEW_EDIT: 'incident_review_edit',
   INCIDENT_REVIEW_CONFIRM: 'incident_review_confirm',
   FINALIZE_VOTES: 'finalize_votes',
+  FINALIZE_CHEATSHEET_TOGGLE_PREFIX: 'finalize_cheatsheet_toggle',
   WITHDRAW_INCIDENT_BUTTON: 'withdraw_incident_button',
   WITHDRAW_SELECT: 'withdraw_incident_select',
   WITHDRAW_REASON_MODAL: 'withdraw_reason_modal',

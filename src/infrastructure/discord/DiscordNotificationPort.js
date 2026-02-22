@@ -7,6 +7,7 @@ const {
 const { fetchTextTargetChannel } = require('../../utils/channels');
 const { editMessageWithRetry } = require('../../utils/messages');
 const { buildEvidencePromptRow } = require('./evidenceUI');
+const { buildFinalizeCheatsheetContent } = require('./finalizeCheatsheet');
 const IDS = require('../../ids');
 
 class DiscordNotificationPort {
@@ -68,49 +69,14 @@ class DiscordNotificationPort {
     return { reporterSeparatorRow, reporterButtons, reporterButtonsRow2 };
   }
 
-  buildFinalizeCheatsheetEmbed() {
-    const sections = [
-      '**Categorie 0**',
-      '- Race incident',
-      '- Niet racen maar op de baan blijven',
-      '- Expres leaven / rage quit',
-      '- Respawnen in pits (kwalificatie)',
-      '- Getunede auto / drivers agreement schenden',
-      '- Onsportief gedrag (spookrijden, wallride, etc.)',
-      '',
-      '**Categorie 1**',
-      '- Agressief aanvallen (zonder positie verlies)',
-      '- Blauwe vlag negeren',
-      '- Niet op omgeving letten',
-      '- Herhaaldelijk aantikken',
-      '- Penalty burnen op racelijn',
-      '- Slechte aansluiting rollende start (>3 lengtes)',
-      '',
-      '**Categorie 2**',
-      '- Agressief aanvallen / verdedigen',
-      '- Van baan drukken / geen ruimte laten',
-      '- Onveilig terugkomen op baan',
-      '- Opzettelijk hinderen (kwalificatie)',
-      '',
-      '**Categorie 3**',
-      '- Iemand van baan afrijden',
-      '- Startprocedures niet naleven',
-      '- Incident tijdens formatieronde',
-      '- Ghosten > 2 ronden',
-      '',
-      '**Categorie 4**',
-      '- Kettingbotsing veroorzaken',
-      '- Expres iemand van baan rijden',
-      '',
-      '**Categorie 5**',
-      '- Startincident verhoogd naar cat 5',
-      '- Verbaal aanvallen / discriminatie'
-    ];
-
-    return new EmbedBuilder()
-      .setColor('#8712ee')
-      .setTitle('📚 Cheatsheet')
-      .setDescription(sections.join('\n'));
+  buildFinalizeControlsRow({ expanded = false } = {}) {
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${IDS.FINALIZE_CHEATSHEET_TOGGLE_PREFIX}:${expanded ? 'hide' : 'show'}`)
+        .setLabel(expanded ? 'Verberg cheatsheet' : 'Toon cheatsheet')
+        .setStyle(ButtonStyle.Danger)
+    );
   }
 
   buildIncidentEmbed({
@@ -246,12 +212,10 @@ class DiscordNotificationPort {
       });
     }
 
-    const finalizeButtons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary)
-    );
+    const finalizeControls = this.buildFinalizeControlsRow({ expanded: false });
     await thread.send({
-      embeds: [this.buildFinalizeCheatsheetEmbed()],
-      components: [finalizeButtons]
+      content: buildFinalizeCheatsheetContent({ expanded: false }),
+      components: [finalizeControls]
     });
 
     return {

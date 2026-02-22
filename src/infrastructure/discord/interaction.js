@@ -26,6 +26,7 @@ const { buildEvidencePromptRow } = require('./evidenceUI');
 const { updateIncidentStatus, updateIncidentResolution } = require('../../utils/sheets');
 const { fetchTextTargetChannel, canSendToChannel } = require('../../utils/channels');
 const { editMessageWithRetry } = require('../../utils/messages');
+const { buildFinalizeCheatsheetContent } = require('./finalizeCheatsheet');
 const {
   normalizeIncidentNumber,
   extractIncidentNumberFromText,
@@ -260,6 +261,15 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     );
     return modal;
   };
+
+  const buildFinalizeControlsRow = ({ expanded = false } = {}) =>
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${IDS.FINALIZE_CHEATSHEET_TOGGLE_PREFIX}:${expanded ? 'hide' : 'show'}`)
+        .setLabel(expanded ? 'Verberg cheatsheet' : 'Toon cheatsheet')
+        .setStyle(ButtonStyle.Danger)
+    );
 
   const buildWithdrawReasonModal = ({ reasonText } = {}) => {
     const modal = new ModalBuilder()
@@ -2360,6 +2370,16 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
       await interaction.editReply({ components: [] });
       await finalizeWithText({ finalText, pending, interaction });
+      return true;
+    }
+
+    if (id.startsWith(`${IDS.FINALIZE_CHEATSHEET_TOGGLE_PREFIX}:`)) {
+      const action = interaction.customId.split(':')[1] || '';
+      const expanded = action === 'show';
+      await interaction.update({
+        content: buildFinalizeCheatsheetContent({ expanded }),
+        components: [buildFinalizeControlsRow({ expanded })]
+      });
       return true;
     }
 

@@ -151,11 +151,16 @@ Veilig guild-default gedrag:
 - `guiltyReplyWindowMs`
 
 ## Cheatsheets
+<details>
+<summary>Toon cheatsheets (spoiler)</summary>
+
 - Variabelen: `VARIABELEN_CHEATSHEET.md`
 - Git: `GIT_CHEATSHEET.md`
 - Uitleg bot: `UITLEG_BOT.md`
 - Google Sheets: `GOOGLE_SHEETS_CHEATSHEET.md`
 - Discord integratie: `DISCORD_CHEATSHEET.md`
+
+</details>
 
 ## Install / Run (kort)
 1) Installeer dependencies:
