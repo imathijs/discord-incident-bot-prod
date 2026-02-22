@@ -135,17 +135,20 @@ class CreateIncident {
 
     let evidenceChannelId = fallbackEvidenceChannelId;
     let botMessageIds = [];
+    let promptMessageId = null;
     if (evidenceUserId) {
       try {
         const dmInfo = await this.notificationPort.sendReporterEvidenceDm({
           reporterId: evidenceUserId,
           content:
             `✅ Je incident-ticket **${incidentNumber}** is verzonden naar de stewards.\n` +
-            `Upload of stuur een link van je bewijsmateriaal in deze DM binnen 10 minuten om het automatisch toe te voegen aan je melding.`
+            `Upload of stuur een link van je bewijsmateriaal in deze DM binnen 10 minuten om het automatisch toe te voegen aan je melding.\n` +
+            'Is je video groter dan 10MB? Klik op **Grote video uploaden**.'
         });
         if (dmInfo?.channelId) {
           evidenceChannelId = dmInfo.channelId;
           botMessageIds = dmInfo.botMessageIds || [];
+          promptMessageId = dmInfo.promptMessageId || null;
         }
       } catch {}
     }
@@ -157,7 +160,8 @@ class CreateIncident {
       expiresAt: this.clock.now() + evidenceWindowMs,
       type: 'incident',
       incidentNumber,
-      botMessageIds
+      botMessageIds,
+      promptMessageId
     });
 
     if (pendingOwnerId) {

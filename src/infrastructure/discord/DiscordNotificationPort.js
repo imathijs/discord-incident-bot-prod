@@ -6,6 +6,7 @@ const {
 } = require('discord.js');
 const { fetchTextTargetChannel } = require('../../utils/channels');
 const { editMessageWithRetry } = require('../../utils/messages');
+const { buildEvidencePromptRow } = require('./evidenceUI');
 const IDS = require('../../ids');
 
 class DiscordNotificationPort {
@@ -290,8 +291,11 @@ class DiscordNotificationPort {
     const reporterUser = await this.client.users.fetch(reporterId).catch(() => null);
     if (!reporterUser) return null;
     const dmChannel = await reporterUser.createDM();
-    const dmIntro = await dmChannel.send(content);
-    return { channelId: dmChannel.id, botMessageIds: [dmIntro.id] };
+    const dmIntro = await dmChannel.send({
+      content,
+      components: [buildEvidencePromptRow('incident')]
+    });
+    return { channelId: dmChannel.id, botMessageIds: [dmIntro.id], promptMessageId: dmIntro.id };
   }
 }
 

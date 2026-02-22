@@ -64,6 +64,9 @@ Niet-geheime Discord IDs staan in `config.json` (wordt bij startup schema-gevali
 - `incidentStewardRoleId` – rol-ID voor @Incident steward (bij teruggenomen incidenten)
 - `incidentCounter` – initiele tellerseed voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – auto‑delete van DM‑berichten/opties
+- `evidenceUploadBaseUrl` – basis URL voor externe bewijs-upload (default `https://uploadbewijs.dutchraceevents.com`)
+- `evidenceUploadBearerToken` – bearer token voor externe bewijs-upload (optioneel, kan ook via env)
+- `evidenceUploadTtlMs` – geldigheid uploadlink in milliseconden (default `3600000`)
 - `googleSheetsEnabled` – zet Google Sheets logging aan/uit
 - `googleSheetsSpreadsheetId` – spreadsheet‑ID
 - `googleSheetsSheetName` – tabbladnaam (sheet)
@@ -94,6 +97,9 @@ Details en setup: `DISCORD_CHEATSHEET.md`.
 ## Environment variabelen
 - `DISCORD_TOKEN` – bot token (verplicht)
 - `ALLOWED_GUILD_ID` – verplichte guild lock voor productiegedrag
+- `EVIDENCE_UPLOAD_BEARER_TOKEN` – bearer token voor externe bewijs-upload (optioneel, nodig voor >10MB flow)
+- `EVIDENCE_UPLOAD_BASE_URL` – basis URL uploadservice (optioneel, default `https://uploadbewijs.dutchraceevents.com`)
+- `EVIDENCE_UPLOAD_TTL_MS` – geldigheid uploadlink in milliseconden (optioneel, default `3600000`)
 - `GOOGLE_SERVICE_ACCOUNT_JSON` – service‑account JSON (string)
 - `GOOGLE_SERVICE_ACCOUNT_B64` – base64 van service‑account JSON
 - `GOOGLE_SERVICE_ACCOUNT_FILE` – pad naar service‑account JSON

@@ -12,7 +12,8 @@ const incidentReasons = [
 
 const evidenceButtonIds = {
   more: 'evidence_more',
-  done: 'evidence_done'
+  done: 'evidence_done',
+  externalUpload: 'evidence_external_upload_button'
 };
 
 // wachttijd van bewijsmateriaal

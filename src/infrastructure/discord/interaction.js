@@ -44,6 +44,7 @@ const { StateIncidentRepository } = require('../persistence/StateIncidentReposit
 const { WorkflowStateStore } = require('../persistence/WorkflowStateStore');
 const { DiscordNotificationPort } = require('./DiscordNotificationPort');
 const { DomainError } = require('../../domain/errors/DomainError');
+const { createExternalEvidenceUploadLink } = require('../../utils/evidenceUpload');
 
 function registerInteractionHandlers(client, { config, state, generateIncidentNumber }) {
   const { store } = state;
@@ -1030,7 +1031,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             '',
             'Je doorloopt de stappen in dit kanaal.',
             'Na het indienen ontvang je een DM om bewijsmateriaal te delen via een',
-            'YouTube-link of door het zelf te uploaden.',
+            'YouTube-link, door het zelf te uploaden, of via externe upload voor grote video\'s.',
             '',
             'De tegenpartij zal een DM ontvangen om zijn visie op het incident toe te lichten.',
             '',
@@ -1038,7 +1039,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             'Zonder bewijsmateriaal kunnen wij een incident niet beoordelen.',
             'Zorg er daarom voor dat je bewijs beschikbaar hebt, zoals:',
             '- een opname van het incident geplaatst op YouTube.',
-            '- losse opname van het incident. Je upload het bestand via discord.'
+            '- losse opname van het incident. Je upload het bestand via Discord.',
+            '- grote video bestanden (>10MB) via de knop "Grote video uploaden" in DM.'
           ].join('\n')
         );
 
@@ -1469,14 +1471,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       if (pending.dmChannelId) {
         try {
           const dmChannel = await interaction.user.createDM();
-          const dmIntro = await dmChannel.send(
-            '✅ Je wederwoord is doorgestuurd naar de stewards.\n' +
-              'Upload of stuur een link naar je bewijsmateriaal in dit kanaal binnen 10 minuten om het automatisch toe te voegen.'
-          );
+          const dmIntro = await dmChannel.send({
+            content:
+              '✅ Je wederwoord is doorgestuurd naar de stewards.\n' +
+              'Upload of stuur een link naar je bewijsmateriaal in dit kanaal binnen 10 minuten om het automatisch toe te voegen.\n' +
+              'Is je video groter dan 10MB? Klik op **Grote video uploaden**.',
+            components: [buildEvidencePromptRow('appeal')]
+          });
           const current = await store.getPendingEvidence(interaction.user.id);
           if (current) {
             await workflowState.setPendingEvidence(interaction.user.id, {
               ...current,
+              promptMessageId: dmIntro.id,
               botMessageIds: [...(current.botMessageIds || []), dmIntro.id]
             });
           }
@@ -2181,7 +2187,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return true;
     }
 
-    if (id === evidenceButtonIds.more || id === evidenceButtonIds.done) {
+    if (
+      id === evidenceButtonIds.more ||
+      id === evidenceButtonIds.done ||
+      id === evidenceButtonIds.externalUpload
+    ) {
       const pending = await store.getPendingEvidence(interaction.user.id);
       const pendingType = pending?.type || 'incident';
       if (!pending) {
@@ -2205,6 +2215,56 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           content: '❌ Tijd verlopen. Start de melding opnieuw.',
           flags: MessageFlags.Ephemeral
         });
+        return true;
+      }
+
+      if (id === evidenceButtonIds.externalUpload) {
+        const incidentNumber = normalizeIncidentNumber(pending.incidentNumber || '');
+        if (!incidentNumber) {
+          await interaction.reply({
+            content: '❌ Incidentnummer ontbreekt in deze sessie. Start de melding opnieuw.',
+            flags: MessageFlags.Ephemeral
+          });
+          return true;
+        }
+
+        const bearerToken = String(config.evidenceUploadBearerToken || '').trim();
+        if (!bearerToken) {
+          await interaction.reply({
+            content: '❌ Externe uploadservice is nog niet geconfigureerd door de beheerder.',
+            flags: MessageFlags.Ephemeral
+          });
+          return true;
+        }
+
+        try {
+          const result = await createExternalEvidenceUploadLink({
+            incidentNumber,
+            bearerToken,
+            ttlMs: config.evidenceUploadTtlMs,
+            baseUrl: config.evidenceUploadBaseUrl
+          });
+          const ttlMinutes = Math.max(1, Math.round((Number(result.ttlMs) || 0) / 60000));
+          await interaction.reply({
+            content:
+              `📤 Grote videobestanden kun je hier uploaden voor **${result.incidentNumber}**:\n` +
+              `${result.uploadUrl}\n` +
+              `Deze link is ongeveer ${ttlMinutes} minuten geldig.\n` +
+              'Plak hieronder de YouTube-link van je bewijs.',
+            flags: MessageFlags.Ephemeral
+          });
+        } catch (err) {
+          console.warn('External evidence upload link failed', {
+            incidentNumber,
+            userId: interaction.user?.id,
+            code: err?.code,
+            error: err?.message
+          });
+          await interaction.reply({
+            content: '❌ Uploadlink kon niet worden aangemaakt. Probeer het later opnieuw.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
         return true;
       }
 

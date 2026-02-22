@@ -22,6 +22,7 @@ module.exports = {
   WITHDRAW_INCIDENT_BUTTON: 'withdraw_incident_button',
   WITHDRAW_SELECT: 'withdraw_incident_select',
   WITHDRAW_REASON_MODAL: 'withdraw_reason_modal',
+  EVIDENCE_EXTERNAL_UPLOAD_BUTTON: 'evidence_external_upload_button',
   VOTE_CAT_PREFIX: 'vote_cat',
   VOTE_REPORTER_CAT_PREFIX: 'vote_reporter_cat',
   VOTE_PLUS: 'vote_plus',

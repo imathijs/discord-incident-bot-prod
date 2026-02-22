@@ -48,6 +48,9 @@ const configSchema = Joi.object({
   withdrawNoticeChannelId: optionalSnowflakeId,
   incidentChatChannelId: snowflakeId.required(),
   incidentCounter: Joi.number().integer().min(1).required(),
+  evidenceUploadBaseUrl: Joi.string().uri().default('https://uploadbewijs.dutchraceevents.com'),
+  evidenceUploadBearerToken: Joi.alternatives().try(Joi.string().trim().min(1), Joi.valid(null)).default(null),
+  evidenceUploadTtlMs: Joi.number().integer().min(60000).default(3600000),
 
   allowedGuildId: optionalSnowflakeId,
   allowedGuildSource: Joi.string().valid('env', 'config.json', 'none').required(),

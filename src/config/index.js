@@ -148,6 +148,16 @@ function buildCandidateConfig({ env, fileConfig }) {
     incidentCounter: parseIntegerFromAny(
       pickValue(envStringOrUndefined(env, 'INCIDENT_COUNTER'), fileConfig.incidentCounter)
     ),
+    evidenceUploadBaseUrl: pickValue(
+      envStringOrUndefined(env, 'EVIDENCE_UPLOAD_BASE_URL'),
+      normalizeOptionalString(fileConfig.evidenceUploadBaseUrl) || undefined
+    ),
+    evidenceUploadBearerToken: normalizeOptionalString(
+      pickValue(envString(env, 'EVIDENCE_UPLOAD_BEARER_TOKEN'), fileConfig.evidenceUploadBearerToken)
+    ),
+    evidenceUploadTtlMs: parseIntegerFromAny(
+      pickValue(envStringOrUndefined(env, 'EVIDENCE_UPLOAD_TTL_MS'), fileConfig.evidenceUploadTtlMs, 3600000)
+    ),
 
     allowedGuildId: allowedGuild.allowedGuildId,
     allowedGuildSource: allowedGuild.allowedGuildSource,
