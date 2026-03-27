@@ -890,24 +890,20 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       });
       return true;
     }
-    let deleted = false;
-    if (voteMessage?.deletable) {
-      await voteMessage.delete().catch(() => {});
-      deleted = true;
-    }
     if (voteChannel?.isThread?.()) {
       await removeFinalizeMessage();
     }
 
-    if (!deleted && voteMessage) {
+    const reporterNameForStatus = interaction.user?.tag || incidentData.reporter || 'Onbekend';
+    const reasonForStatus = String(reasonText || '').trim() || 'Geen reden opgegeven.';
+
+    if (voteMessage) {
       const baseEmbed = voteMessage.embeds[0]
         ? EmbedBuilder.from(voteMessage.embeds[0])
         : new EmbedBuilder().setTitle(`🚨 Incident ${incidentData.incidentNumber || 'Onbekend'}`);
       const fields = baseEmbed.data.fields ?? [];
       const statusIndex = fields.findIndex((f) => f.name === '🛑 Status');
-      const statusValue = reasonText
-        ? `Teruggenomen door ${interaction.user.tag}\nReden: ${reasonText}`
-        : `Teruggenomen door ${interaction.user.tag}`;
+      const statusValue = `Incident is teruggetrokken door ${reporterNameForStatus}.\nReden: ${reasonForStatus}`;
       const statusField = { name: '🛑 Status', value: statusValue };
       if (statusIndex >= 0) {
         fields[statusIndex] = statusField;
@@ -926,16 +922,23 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
 
     const reporterMention = incidentData.reporterId ? `<@${incidentData.reporterId}>` : incidentData.reporter;
-    const reasonLine = reasonText ? `\nReden: ${reasonText}` : '';
 
     if (voteChannel?.isThread?.()) {
+      const currentThreadName = String(voteChannel.name || '').trim();
+      let withdrawnThreadName = currentThreadName;
+      if (currentThreadName.startsWith('⚠️')) withdrawnThreadName = currentThreadName.replace(/^⚠️/, '🛑');
+      else if (currentThreadName.startsWith('✅')) withdrawnThreadName = currentThreadName.replace(/^✅/, '🛑');
+      else if (!currentThreadName.startsWith('🛑')) withdrawnThreadName = `🛑 ${currentThreadName}`;
+      if (withdrawnThreadName && withdrawnThreadName !== currentThreadName) {
+        await voteChannel.setName(withdrawnThreadName.slice(0, 100)).catch(() => {});
+      }
       const stewardRoleId = config.incidentStewardRoleId || config.stewardRoleId;
       const stewardMention = stewardRoleId ? `<@&${stewardRoleId}>` : '@Incident steward';
       await voteChannel
         .send({
           content: reporterMention
-            ? `🛑 ${stewardMention} - Incident is teruggetrokken door ${reporterMention}.${reasonLine}`
-            : `🛑 ${stewardMention} - Incident is teruggetrokken door de indiener.${reasonLine}`
+            ? `🛑 ${stewardMention} - Incident is teruggetrokken door ${reporterMention}.\nReden: ${reasonForStatus}`
+            : `🛑 ${stewardMention} - Incident is teruggetrokken door ${reporterNameForStatus}.\nReden: ${reasonForStatus}`
         })
         .catch(() => {});
     }
@@ -988,9 +991,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       status: 'WITHDRAWN'
     });
     await respond({
-      content: deleted
-        ? `✅ Incident **${ticketNumber}** is verwijderd.`
-        : `✅ Incident **${ticketNumber}** is teruggenomen en afgesloten.`
+      content: `✅ Incident **${ticketNumber}** is teruggenomen en afgesloten.`
     });
     return true;
   };

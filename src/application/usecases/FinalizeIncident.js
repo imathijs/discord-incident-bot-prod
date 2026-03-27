@@ -13,7 +13,7 @@ class FinalizeIncident {
     const reporterPenaltyPoints = computePenaltyPoints(incidentData.votes, 'reporter');
 
     let finalTextValue = finalText;
-    if (decision === 'CAT0') finalTextValue = 'No futher action';
+    if (decision === 'CAT0') finalTextValue = 'No further action';
 
     return {
       tally,
