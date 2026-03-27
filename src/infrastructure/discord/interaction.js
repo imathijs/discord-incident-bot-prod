@@ -324,16 +324,6 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
   const listOpenIncidentsForUser = async (user) => {
     const items = [];
-    const openIncidents = await store.listOpenIncidents({ withVotes: true });
-    for (const incident of openIncidents) {
-      const isReporter =
-        (incident.reporterId && incident.reporterId === user.id) ||
-        (!incident.reporterId && incident.reporter && incident.reporter === user.tag);
-      if (!isReporter) continue;
-      items.push(incident);
-    }
-    if (items.length) return items;
-
     const forumChannel = await fetchTextTargetChannel(client, config.voteChannelId);
     if (!forumChannel?.threads?.fetchActive) return items;
     const active = await forumChannel.threads.fetchActive().catch(() => null);
@@ -341,7 +331,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     for (const thread of active.threads.values()) {
       if (!thread?.isThread?.()) continue;
-      if (String(thread.name || '').startsWith('✅')) continue;
+      if (!String(thread.name || '').startsWith('⚠️')) continue;
       const starter = await thread.fetchStarterMessage().catch(() => null);
       if (!starter) continue;
       const recovered = hydrateIncidentFromMessage(starter);
@@ -799,7 +789,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       await interaction.editReply({
         content:
-          `✅ Je incident-ticket **${result.incidentNumber}** is verzonden naar de stewards!\n` +
+          `🔔 Je incident-ticket **${result.incidentNumber}** is verzonden naar de stewards!\n` +
           `Je hebt zojuist een DM ontvangen van de Bot. Upload of deel je bewijsmateriaal via de DM.`
       });
     } catch (err) {
@@ -1031,30 +1021,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       const row = new ActionRowBuilder().addComponents(reportButton, withdrawButton);
 
-      const embed = new EmbedBuilder()
-        .setColor('#FF0000')
-        .setTitle('DRE - Race Incident Meldingssysteem')
-        .setDescription(
-          [
-            'Wil je een incident melden bij de stewards van DRE?',
-            'Klik dan op de knop **Meld Incident**.',
-            '',
-            'Je doorloopt de stappen in dit kanaal.',
-            'Na het indienen ontvang je een DM om bewijsmateriaal te delen via een',
-            'YouTube-link, door het zelf te uploaden, of via externe upload voor grote video\'s.',
-            '',
-            'De tegenpartij zal een DM ontvangen om zijn visie op het incident toe te lichten.',
-            '',
-            '⚠️ **Belangrijk**',
-            'Zonder bewijsmateriaal kunnen wij een incident niet beoordelen.',
-            'Zorg er daarom voor dat je bewijs beschikbaar hebt, zoals:',
-            '- een opname van het incident geplaatst op YouTube.',
-            '- losse opname van het incident. Je upload het bestand via Discord.',
-            '- grote video bestanden (>10MB) via de knop "Grote video uploaden" in DM.'
-          ].join('\n')
-        );
-
-      await interaction.reply({ embeds: [embed], components: [row] });
+      await interaction.reply({ components: [row] });
       return true;
     }
 
@@ -1869,7 +1836,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       try {
         const resolvedThreadId = config.resolvedThreadId || config.resolvedChannelId;
         const dmText =
-          `Incident ticket ${incidentData.incidentNumber || 'Onbekend'} is afgehandeld. ` +
+          `🏁 Incident ticket **${incidentData.incidentNumber || 'Onbekend'}** is afgehandeld.\n` +
           `Het besluit staat in kanaal Incidenten > Afgehandeld <#${resolvedThreadId}>`;
         const dmTargets = [incidentData.reporterId, incidentData.guiltyId].filter(Boolean);
         for (const userId of dmTargets) {
