@@ -1679,7 +1679,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         { userId: interaction.user?.id }
       );
     } catch {}
-    const resultMessage = await voteMessage.reply({ embeds: [resultEmbed] });
+    const resultMessage = await voteChannel.send({ embeds: [resultEmbed] });
 
     await store.saveIncident({
       ...incidentData,
@@ -1716,55 +1716,46 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           const reporterLabel = await formatUserLabel(incidentData.reporter, resolvedChannel.guild);
           const guiltyLabel = await formatUserLabel(incidentData.guiltyDriver, resolvedChannel.guild);
           const finalTextRaw = String(finalTextValue || '').trim() || '*Geen eindoordeel ingevuld*';
-          const fieldMax = 1024;
-          const finalTextChunks = [];
-          for (let i = 0; i < finalTextRaw.length; i += fieldMax) {
-            finalTextChunks.push(finalTextRaw.slice(i, i + fieldMax));
+          const reportText = [
+            `**Incident ${incidentData.incidentNumber || 'Onbekend'} - ${reporterLabel || 'Onbekend'} vs ${guiltyLabel || 'Onbekend'}**`,
+            'Status: **AFGEHANDELD**',
+            '',
+            'Uitslag van het stewardsoverleg.',
+            '',
+            '**📝 Eindoordeel**',
+            finalTextRaw,
+            '',
+            '**⚖️ Besluit**',
+            `Dader: **${daderDecisionDisplay}**`,
+            `Indiener: **${reporterDecisionDisplay}**`,
+            '',
+            '**🚨 Straf**',
+            `Dader: **${daderSanction}**`,
+            `Indiener: **${reporterSanction}**`,
+            '',
+            '**🧾 Samenvatting**',
+            `Incidentnummer: **${incidentData.incidentNumber || 'Onbekend'}**`,
+            `Divisie: **${incidentData.division || 'Onbekend'}**`,
+            `Race: **${incidentData.raceName}**  •  Ronde: **${incidentData.round}**`,
+            `Ingediend door: **${incidentData.reporter || 'Onbekend'}**`,
+            `Rijder: **${incidentData.guiltyDriver}**`,
+            `Reden: **${incidentData.reason || 'Onbekend'}**`
+          ].join('\n');
+
+          const maxDiscordMessageLength = 1900;
+          const chunks = [];
+          let remaining = reportText;
+          while (remaining.length > maxDiscordMessageLength) {
+            let splitAt = remaining.lastIndexOf('\n', maxDiscordMessageLength);
+            if (splitAt < 1) splitAt = maxDiscordMessageLength;
+            chunks.push(remaining.slice(0, splitAt));
+            remaining = remaining.slice(splitAt).replace(/^\n+/, '');
           }
-          const finalDecisionFields =
-            finalTextChunks.length > 0
-              ? finalTextChunks.map((chunk, idx) => ({
-                  name: idx === 0 ? '📝 Eindoordeel' : '📝 Eindoordeel (vervolg)',
-                  value: chunk
-                }))
-              : [{ name: '📝 Eindoordeel', value: '*Geen eindoordeel ingevuld*' }];
-          const reportEmbed = new EmbedBuilder()
-            .setColor(getDecisionColor(decision))
-            .setTitle(
-              `Incident ${incidentData.incidentNumber || 'Onbekend'} - ` +
-                `${reporterLabel || 'Onbekend'} vs ${guiltyLabel || 'Onbekend'}`
-            )
-            .setDescription('Status: **AFGEHANDELD**\n\nUitslag van het stewardsoverleg.')
-            .addFields(
-              { name: '\u200b', value: '\u200b' },
-              ...finalDecisionFields,
-              { name: '\u200b', value: '\u200b' },
-              {
-                name: '⚖️ Besluit',
-                value:
-                  `Dader: **${daderDecisionDisplay}**\n` +
-                  `Indiener: **${reporterDecisionDisplay}**`
-              },
-              {
-                name: '🚨 Straf',
-                value:
-                  `Dader: **${daderSanction}**\n` +
-                  `Indiener: **${reporterSanction}**`
-              },
-              { name: '\u200b', value: '\u200b' },
-              {
-                name: '🧾 Samenvatting',
-                value:
-                  `Incidentnummer: **${incidentData.incidentNumber || 'Onbekend'}**\n` +
-                  `Divisie: **${incidentData.division || 'Onbekend'}**\n` +
-                  `Race: **${incidentData.raceName}**  •  Ronde: **${incidentData.round}**\n` +
-                  `Ingediend door: **${incidentData.reporter || 'Onbekend'}**\n` +
-                  `Rijder: **${incidentData.guiltyDriver}**\n` +
-                  `Reden: **${incidentData.reason || 'Onbekend'}**`
-              }
-            )
-            .setTimestamp();
-          await resolvedChannel.send({ embeds: [reportEmbed] });
+          if (remaining) chunks.push(remaining);
+
+          for (const chunk of chunks) {
+            await resolvedChannel.send({ content: chunk });
+          }
 
           // Update thread name to resolved status (best effort).
           if (voteChannel.isThread?.()) {

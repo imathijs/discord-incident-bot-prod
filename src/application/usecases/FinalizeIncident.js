@@ -12,9 +12,6 @@ class FinalizeIncident {
     const reporterDecision = reporterWinner ? reporterWinner.toUpperCase() : 'CAT0';
     const reporterPenaltyPoints = computePenaltyPoints(incidentData.votes, 'reporter');
 
-    let finalTextValue = finalText;
-    if (decision === 'CAT0') finalTextValue = 'No further action';
-
     return {
       tally,
       decision,
@@ -22,7 +19,7 @@ class FinalizeIncident {
       reporterTally,
       reporterDecision,
       reporterPenaltyPoints,
-      finalTextValue
+      finalTextValue: finalText
     };
   }
 }
