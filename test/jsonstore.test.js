@@ -74,4 +74,66 @@ describe('JsonStore concurrency', () => {
       await removeDir(dir);
     }
   });
+
+  test('purgeIncident removes incident, votes and workflow references', async () => {
+    const { store, dir } = await createTempStore();
+    try {
+      await store.saveIncident({
+        id: 'msg-42',
+        incidentNumber: 'INC-42',
+        status: 'OPEN',
+        reporterId: 'reporter-1',
+        guiltyId: 'guilty-1'
+      });
+      await store.setVotes('msg-42', {
+        steward1: {
+          category: 'cat1',
+          plus: false,
+          minus: false,
+          reporterCategory: null,
+          reporterPlus: false,
+          reporterMinus: false
+        }
+      });
+      await store.setPendingEvidence('reporter-1', {
+        messageId: 'msg-42',
+        incidentNumber: 'INC-42',
+        expiresAt: Date.now() + 60000
+      });
+      await store.setPendingFinalization('steward-1', {
+        messageId: 'msg-42',
+        incidentNumber: 'INC-42',
+        incidentSnapshot: { incidentNumber: 'INC-42' },
+        expiresAt: Date.now() + 60000
+      });
+      await store.setPendingWithdrawal('reporter-1', {
+        incidentNumber: 'INC-42',
+        expiresAt: Date.now() + 60000
+      });
+      await store.setPendingGuiltyReply('guilty-1', 'INC-42', {
+        incidentNumber: 'INC-42',
+        expiresAt: Date.now() + 60000
+      });
+
+      await store.purgeIncident('msg-42', 'inc-42');
+
+      const incident = await store.getIncident('msg-42');
+      const incidentByNumber = await store.getIncidentByNumber('INC-42');
+      const votes = await store.getVotes('msg-42');
+      const pendingEvidence = await store.getPendingEvidence('reporter-1');
+      const pendingFinalization = await store.getPendingFinalization('steward-1');
+      const pendingWithdrawal = await store.getPendingWithdrawal('reporter-1');
+      const pendingGuiltyReplies = await store.getPendingGuiltyRepliesByUser('guilty-1');
+
+      expect(incident).toBeNull();
+      expect(incidentByNumber).toBeNull();
+      expect(votes).toEqual({});
+      expect(pendingEvidence).toBeNull();
+      expect(pendingFinalization).toBeNull();
+      expect(pendingWithdrawal).toBeNull();
+      expect(pendingGuiltyReplies).toBeNull();
+    } finally {
+      await removeDir(dir);
+    }
+  });
 });

@@ -124,11 +124,6 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return { embed: newEmbed, changed: true };
   };
 
-  const removePendingGuiltyReply = async (incidentNumber) => {
-    if (!incidentNumber) return;
-    await store.deletePendingGuiltyRepliesByIncident(incidentNumber);
-  };
-
   const formatUserLabel = async (value, guild) => {
     const raw = String(value || '').trim();
     const userId = extractUserIdFromText(raw);
@@ -345,6 +340,26 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
     return items;
   };
+
+  const listActiveIncidentsByParticipant = async (userId) => {
+    if (!userId) return [];
+    const incidents = await store.listOpenIncidents({ withVotes: false });
+    return incidents
+      .filter((incident) => incident?.incidentNumber && (incident.reporterId === userId || incident.guiltyId === userId))
+      .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+  };
+
+  const buildDmIncidentActionRow = (incidentNumber) =>
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${IDS.DM_ACTION_EVIDENCE_PREFIX}:${incidentNumber}`)
+        .setLabel('Bewijs toevoegen')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${IDS.DM_ACTION_STEWARD_PREFIX}:${incidentNumber}`)
+        .setLabel('Bericht sturen naar steward')
+        .setStyle(ButtonStyle.Secondary)
+    );
 
   const buildWithdrawSelectOptions = async (incidents, guild) => {
     const options = await Promise.all(
@@ -849,14 +864,6 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     const respond = (payload) =>
       interaction.replied || interaction.deferred ? interaction.editReply(payload) : interaction.reply(payload);
 
-    const pendingEvidenceEntries = await store.listPendingEvidenceEntries();
-    for (const [userId, pending] of pendingEvidenceEntries) {
-      if ((pending.incidentNumber || '').toUpperCase() === normalizedTicket) {
-        await store.deletePendingEvidence(userId);
-      }
-    }
-    await removePendingGuiltyReply(incidentData.incidentNumber || ticketNumber);
-
     const voteChannel = await fetchTextTargetChannel(client, incidentData?.threadId || config.voteChannelId);
     if (!voteChannel) {
       await respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
@@ -985,11 +992,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
     } catch {}
 
-    await store.saveIncident({
-      ...incidentData,
-      id: messageId,
-      status: 'WITHDRAWN'
-    });
+    await store.purgeIncident(messageId, incidentData.incidentNumber || ticketNumber);
     await respond({
       content: `✅ Incident **${ticketNumber}** is teruggenomen en afgesloten.`
     });
@@ -1134,6 +1137,35 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
   const handleSelectMenu = async (interaction) => {
     if (!interaction.isUserSelectMenu() && !interaction.isStringSelectMenu()) return false;
+
+    if (interaction.isStringSelectMenu() && interaction.customId === IDS.DM_ACTIVE_INCIDENT_SELECT) {
+      const incidentNumber = String(interaction.values?.[0] || '').trim();
+      if (!incidentNumber) {
+        await interaction.reply({ content: '❌ Geen incident geselecteerd.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const active = await listActiveIncidentsByParticipant(interaction.user.id);
+      const match = active.find(
+        (incident) => (incident.incidentNumber || '').toUpperCase() === incidentNumber.toUpperCase()
+      );
+      if (!match) {
+        await interaction.reply({
+          content: '❌ Dit incident is niet (meer) actief voor jou.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      await interaction.update({
+        content:
+          `Incident geselecteerd: **${match.incidentNumber}** (${match.raceName || 'Onbekende race'}, ronde ${
+            match.round || '?'
+          }).\n` + 'Wil je bewijs toevoegen of nog iets delen met de steward?',
+        components: [buildDmIncidentActionRow(match.incidentNumber)]
+      });
+      return true;
+    }
 
     if (interaction.isStringSelectMenu() && interaction.customId === IDS.WITHDRAW_SELECT) {
       const incidentNumber = String(interaction.values?.[0] || '').trim();
@@ -1681,17 +1713,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     } catch {}
     const resultMessage = await voteChannel.send({ embeds: [resultEmbed] });
 
-    await store.saveIncident({
-      ...incidentData,
-      id: pending.messageId,
-      status: 'FINALIZED',
-      outcome: {
-        decision,
-        finalizedAt: Date.now(),
-        publishedMessageId: resultMessage?.id || null
-      }
-    });
-    await removePendingGuiltyReply(incidentData.incidentNumber);
+    await store.purgeIncident(pending.messageId, incidentData.incidentNumber);
     await store.deletePendingFinalization(interaction.user.id);
 
     const resolvedTargetId = config.resolvedThreadId || config.resolvedChannelId;
@@ -1851,6 +1873,80 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
   const handleButton = async (interaction) => {
     if (!interaction.isButton()) return false;
     const id = interaction.customId;
+
+    if (id.startsWith(`${IDS.DM_ACTION_EVIDENCE_PREFIX}:`)) {
+      const incidentNumber = id.split(':')[1] || '';
+      const active = await listActiveIncidentsByParticipant(interaction.user.id);
+      const match = active.find(
+        (incident) => (incident.incidentNumber || '').toUpperCase() === incidentNumber.toUpperCase()
+      );
+      if (!match) {
+        await interaction.reply({
+          content: '❌ Dit incident is niet (meer) actief voor jou.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      await store.setPendingEvidence(interaction.user.id, {
+        messageId: match.id,
+        voteThreadId: match.threadId || config.voteChannelId,
+        channelId: interaction.channelId,
+        expiresAt: Date.now() + evidenceWindowMs,
+        type: 'incident',
+        incidentNumber: match.incidentNumber,
+        botMessageIds: [],
+        promptMessageId: null
+      });
+      try {
+        await store.appendAudit({
+          ts: Date.now(),
+          type: 'dm_interaction',
+          action: 'select_evidence',
+          userId: interaction.user.id,
+          incidentNumber: match.incidentNumber
+        });
+      } catch {}
+
+      await interaction.reply({
+        content:
+          `✅ Upload of deel je bewijs voor **${match.incidentNumber}** in deze DM binnen 10 minuten.\n` +
+          'Je kunt bijlagen toevoegen of een YouTube/Twitch-link sturen.'
+      });
+      return true;
+    }
+
+    if (id.startsWith(`${IDS.DM_ACTION_STEWARD_PREFIX}:`)) {
+      const incidentNumber = id.split(':')[1] || '';
+      const active = await listActiveIncidentsByParticipant(interaction.user.id);
+      const match = active.find(
+        (incident) => (incident.incidentNumber || '').toUpperCase() === incidentNumber.toUpperCase()
+      );
+      if (!match) {
+        await interaction.reply({
+          content: '❌ Dit incident is niet (meer) actief voor jou.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      try {
+        await store.appendAudit({
+          ts: Date.now(),
+          type: 'dm_interaction',
+          action: 'select_steward_message',
+          userId: interaction.user.id,
+          incidentNumber: match.incidentNumber
+        });
+      } catch {}
+
+      await interaction.reply({
+        content:
+          `✉️ Stuur je bericht nu in deze DM met incidentnummer **${match.incidentNumber}** erbij, bijvoorbeeld:\n` +
+          `\`${match.incidentNumber} Ik wil nog iets toelichten voor de steward.\``
+      });
+      return true;
+    }
 
     // 2) Meld-knop: start in DM
     if (id === IDS.REPORT_INCIDENT) {

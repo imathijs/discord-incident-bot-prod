@@ -1,10 +1,17 @@
-const { EmbedBuilder } = require('discord.js');
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder
+} = require('discord.js');
 const { evidenceWindowMs, guiltyReplyWindowMs } = require('../../constants');
 const { downloadAttachment, scheduleMessageDeletion } = require('../../utils/evidence');
 const { fetchTextTargetChannel } = require('../../utils/channels');
 const { editMessageWithRetry } = require('../../utils/messages');
 const { AddEvidence } = require('../../application/usecases/AddEvidence');
 const { buildEvidencePromptRow } = require('./evidenceUI');
+const IDS = require('../../ids');
 const {
   normalizeIncidentNumber,
   extractIncidentNumberFromText,
@@ -260,6 +267,10 @@ const sendGuiltyReplyToStewards = async ({
 };
 
 const finalizeGuiltyReply = async ({ message, store, incidentKey, pendingEntry }) => {
+  const normalizedIncident = normalizeTicketInput(incidentKey || pendingEntry?.incidentNumber);
+  if (normalizedIncident) {
+    await store.deletePendingGuiltyReply(message.author.id, normalizedIncident);
+  }
   await message.reply(
     `✅ Je reactie is doorgestuurd naar de stewards voor incident **${
       pendingEntry.incidentNumber || incidentKey || 'Onbekend'
@@ -290,6 +301,66 @@ const isAllowedEvidenceUrl = (url) => {
   }
 };
 
+const listActiveIncidentsForUser = async (store, userId) => {
+  if (typeof store?.listOpenIncidents !== 'function') return [];
+  const open = await store.listOpenIncidents({ withVotes: false });
+  return open
+    .filter((incident) => {
+      if (!incident?.incidentNumber) return false;
+      return incident.reporterId === userId || incident.guiltyId === userId;
+    })
+    .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+};
+
+const summarizeIncident = (incident) => {
+  const incidentNumber = incident?.incidentNumber || 'Onbekend';
+  const raceName = incident?.raceName || 'Onbekende race';
+  const round = incident?.round || '?';
+  return `- ${incidentNumber}: ${raceName} (ronde ${round})`;
+};
+
+const buildDmActionRow = (incidentNumber) =>
+  new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${IDS.DM_ACTION_EVIDENCE_PREFIX}:${incidentNumber}`)
+      .setLabel('Bewijs toevoegen')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`${IDS.DM_ACTION_STEWARD_PREFIX}:${incidentNumber}`)
+      .setLabel('Bericht sturen naar steward')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+const buildDmIncidentSelectRow = (incidents) => {
+  const options = incidents.slice(0, 25).map((incident) => {
+    const incidentNumber = incident.incidentNumber || '';
+    const raceName = incident.raceName || 'Onbekende race';
+    const round = incident.round || '?';
+    const baseLabel = `${incidentNumber} - ${raceName} (ronde ${round})`;
+    const label = baseLabel.length > 100 ? `${baseLabel.slice(0, 97)}...` : baseLabel;
+    return { label, value: incidentNumber };
+  });
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(IDS.DM_ACTIVE_INCIDENT_SELECT)
+    .setPlaceholder('Selecteer een incident')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(options);
+
+  return new ActionRowBuilder().addComponents(select);
+};
+
+const auditDmEvent = async (store, payload) => {
+  try {
+    await store.appendAudit({
+      ts: Date.now(),
+      type: 'dm_interaction',
+      ...payload
+    });
+  } catch {}
+};
+
 function registerMessageHandlers(client, { config, state }) {
   const { store, autoDeleteMs } = state;
   const incidentChatChannelId = config.incidentChatChannelId;
@@ -304,9 +375,61 @@ function registerMessageHandlers(client, { config, state }) {
     const urls = extractUrls(message.content);
     const allowedUrls = urls.filter(isAllowedEvidenceUrl);
     const hasEvidencePayload = message.attachments.size > 0 || allowedUrls.length > 0;
+    const isDm = !message.guildId;
 
     const pendingByUser = await store.getPendingGuiltyRepliesByUser(message.author.id);
-    if (!message.guildId && pendingByUser) {
+    const pendingForEvidence = isDm ? await store.getPendingEvidence(message.author.id) : null;
+    const ticketInput = isDm ? extractIncidentNumberFromText(message.content || '') : '';
+    const normalizedTicketInput = isDm ? normalizeTicketInput(ticketInput) : '';
+    const isEvidenceFlow =
+      isDm &&
+      hasEvidencePayload &&
+      pendingForEvidence &&
+      pendingForEvidence.channelId === message.channelId;
+
+    if (isDm) {
+      const activeIncidents = pendingByUser
+        ? []
+        : await listActiveIncidentsForUser(store, message.author.id);
+      const activeIncidentCount = pendingByUser
+        ? Object.keys(pendingByUser || {}).length
+        : activeIncidents.length;
+      await auditDmEvent(store, {
+        userId: message.author.id,
+        username: message.author.tag,
+        channelId: message.channelId,
+        messageId: message.id,
+        activeIncidentCount
+      });
+
+      if (!pendingByUser && activeIncidents.length === 0) {
+        await message.reply(
+          'Volgens mijn systemen speel jij momenteel geen hoofdrol in een actief incident 🎭—dus ik kan je daar helaas niet aan koppelen.'
+        );
+        return;
+      }
+
+      if (!pendingByUser && !normalizedTicketInput && !isEvidenceFlow) {
+        const lines = activeIncidents.slice(0, 10).map(summarizeIncident);
+        const extraLine =
+          activeIncidents.length > 10
+            ? `\n... en nog ${activeIncidents.length - 10} actieve incident(en).`
+            : '';
+        const content =
+          `Je bent gekoppeld aan de volgende actieve incidenten:\n${lines.join('\n')}${extraLine}\n\n` +
+          'Wil je bewijs toevoegen of nog iets delen met de steward?';
+
+        const components =
+          activeIncidents.length > 1
+            ? [buildDmIncidentSelectRow(activeIncidents)]
+            : [buildDmActionRow(activeIncidents[0].incidentNumber)];
+
+        await message.reply({ content, components });
+        return;
+      }
+    }
+
+    if (isDm && pendingByUser) {
       const incidentFromMessage = extractIncidentNumberFromText(message.content || '');
       if (!incidentFromMessage) {
         await message.reply(
@@ -375,14 +498,8 @@ function registerMessageHandlers(client, { config, state }) {
       }
     }
 
-    if (!message.guildId) {
-      const ticketInput = extractIncidentNumberFromText(message.content || '');
-      let normalizedTicket = normalizeTicketInput(ticketInput);
-      const pendingForEvidence = await store.getPendingEvidence(message.author.id);
-      const isEvidenceFlow =
-        hasEvidencePayload &&
-        pendingForEvidence &&
-        pendingForEvidence.channelId === message.channelId;
+    if (isDm) {
+      let normalizedTicket = normalizedTicketInput;
       if (!normalizedTicket) {
         if (!isEvidenceFlow) {
           await message.reply(

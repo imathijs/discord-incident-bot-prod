@@ -159,6 +159,143 @@ class JsonStore {
     });
   }
 
+  async deleteVotes(incidentId) {
+    if (!incidentId) return false;
+    return this.withFileLock(this.paths.votes, this.getDefaultVotes(), (data) => {
+      if (!Object.prototype.hasOwnProperty.call(data.votes, incidentId)) {
+        return { changed: false, result: false };
+      }
+      delete data.votes[incidentId];
+      return { result: true };
+    });
+  }
+
+  async purgeIncident(incidentId, incidentNumber) {
+    const normalizedInput = normalizeIncidentNumber(incidentNumber);
+    const incidentCleanup = await this.withFileLock(this.paths.incidents, this.getDefaultIncidents(), (data) => {
+      const incidents = data.incidents || {};
+      const byNumber = data.byNumber || {};
+      const workflow = data.workflow || {};
+      const targetIncidentIds = new Set();
+      const targetIncidentNumbers = new Set();
+
+      if (incidentId) targetIncidentIds.add(String(incidentId));
+      if (normalizedInput) targetIncidentNumbers.add(normalizedInput);
+
+      const mappedId = normalizedInput ? byNumber[normalizedInput] : null;
+      if (mappedId) targetIncidentIds.add(String(mappedId));
+
+      for (const id of targetIncidentIds) {
+        const incident = incidents[id];
+        const incidentNumberFromRecord = normalizeIncidentNumber(incident?.incidentNumber);
+        if (incidentNumberFromRecord) targetIncidentNumbers.add(incidentNumberFromRecord);
+      }
+
+      let removedIncidentCount = 0;
+      for (const id of targetIncidentIds) {
+        if (!incidents[id]) continue;
+        const incidentNumberFromRecord = normalizeIncidentNumber(incidents[id]?.incidentNumber);
+        delete incidents[id];
+        removedIncidentCount += 1;
+        if (incidentNumberFromRecord && byNumber[incidentNumberFromRecord] === id) {
+          delete byNumber[incidentNumberFromRecord];
+        }
+      }
+
+      for (const incidentNumberKey of targetIncidentNumbers) {
+        const linkedId = byNumber[incidentNumberKey];
+        if (linkedId && incidents[linkedId]) {
+          delete incidents[linkedId];
+          removedIncidentCount += 1;
+        }
+        delete byNumber[incidentNumberKey];
+      }
+
+      const isReferenceMatch = (payload) => {
+        if (!payload || typeof payload !== 'object') return false;
+        const payloadMessageId = payload.messageId ? String(payload.messageId) : '';
+        const payloadIncident = normalizeIncidentNumber(payload.incidentNumber);
+        const payloadSnapshotIncident = normalizeIncidentNumber(payload.incidentSnapshot?.incidentNumber);
+        if (incidentId && payloadMessageId && payloadMessageId === String(incidentId)) return true;
+        if (targetIncidentNumbers.size === 0) return false;
+        return (
+          (payloadIncident && targetIncidentNumbers.has(payloadIncident)) ||
+          (payloadSnapshotIncident && targetIncidentNumbers.has(payloadSnapshotIncident))
+        );
+      };
+
+      const workflowMapKeys = [
+        'pendingEvidence',
+        'pendingIncidentReports',
+        'pendingAppeals',
+        'pendingFinalizations',
+        'pendingWithdrawals'
+      ];
+
+      let removedWorkflowEntries = 0;
+      for (const mapKey of workflowMapKeys) {
+        const map = workflow[mapKey] || {};
+        for (const [userId, payload] of Object.entries(map)) {
+          if (!isReferenceMatch(payload)) continue;
+          delete map[userId];
+          removedWorkflowEntries += 1;
+        }
+        workflow[mapKey] = map;
+      }
+
+      const guiltyReplies = workflow.pendingGuiltyReplies || {};
+      let removedGuiltyReplyEntries = 0;
+      for (const [userId, entries] of Object.entries(guiltyReplies)) {
+        if (!entries || typeof entries !== 'object') continue;
+        for (const incidentKey of targetIncidentNumbers) {
+          if (!Object.prototype.hasOwnProperty.call(entries, incidentKey)) continue;
+          delete entries[incidentKey];
+          removedGuiltyReplyEntries += 1;
+        }
+        if (Object.keys(entries).length === 0) {
+          delete guiltyReplies[userId];
+        } else {
+          guiltyReplies[userId] = entries;
+        }
+      }
+      workflow.pendingGuiltyReplies = guiltyReplies;
+      data.workflow = workflow;
+      data.incidents = incidents;
+      data.byNumber = byNumber;
+
+      const removedIncidentIds = Array.from(targetIncidentIds).filter((id) => !incidents[id]);
+      const changed =
+        removedIncidentCount > 0 || removedWorkflowEntries > 0 || removedGuiltyReplyEntries > 0;
+
+      return {
+        changed,
+        result: {
+          removedIncidentCount,
+          removedIncidentIds,
+          removedWorkflowEntries,
+          removedGuiltyReplyEntries
+        }
+      };
+    });
+
+    const voteCleanup = await this.withFileLock(this.paths.votes, this.getDefaultVotes(), (data) => {
+      const votes = data.votes || {};
+      let removedVoteBuckets = 0;
+      for (const id of incidentCleanup.removedIncidentIds || []) {
+        if (!Object.prototype.hasOwnProperty.call(votes, id)) continue;
+        delete votes[id];
+        removedVoteBuckets += 1;
+      }
+      data.votes = votes;
+      return { changed: removedVoteBuckets > 0, result: removedVoteBuckets };
+    });
+
+    return {
+      ...incidentCleanup,
+      removedVoteBuckets: voteCleanup
+    };
+  }
+
   async listOpenIncidents({ withVotes = true } = {}) {
     const data = await this.readIncidents();
     const incidents = Object.values(data.incidents);
