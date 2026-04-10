@@ -813,6 +813,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
           content: '❌ Je melding mist gegevens. Klik op **Bewerken** en vul alles opnieuw in.'
         });
       }
+      if (err instanceof DomainError && err.code === 'SELF_CULPRIT') {
+        return interaction.editReply({
+          content: '❌ Je kan jezelf niet kiezen als schuldige rijder. Kies de tegenpartij.'
+        });
+      }
       if (err?.code === 'VOTE_CHANNEL_MISSING') {
         return interaction.editReply({
           content: '❌ Stem-kanaal niet gevonden of is geen forum-kanaal. Check voteChannelId.'
@@ -1300,6 +1305,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const selectedUserId = interaction.values[0];
+      if (selectedUserId === interaction.user.id) {
+        await interaction.reply({
+          content: '❌ Je kan jezelf niet kiezen als schuldige rijder. Kies de tegenpartij.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
       const selectedUser = interaction.users.get(selectedUserId);
       pending.guiltyId = selectedUserId;
       pending.guiltyTag = selectedUser ? selectedUser.tag : 'Onbekend';

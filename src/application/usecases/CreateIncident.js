@@ -31,8 +31,13 @@ class CreateIncident {
     const raceName = pending?.raceName;
     const round = pending?.round;
     const description = pending?.description;
+    const reporterId = pending?.reporterId;
+    const guiltyId = pending?.guiltyId;
     if (!raceName || !round || !description) {
       throw new DomainError('Missing incident fields', 'MISSING_FIELDS');
+    }
+    if (reporterId && guiltyId && reporterId === guiltyId) {
+      throw new DomainError('Reporter cannot be guilty driver', 'SELF_CULPRIT');
     }
 
     const division = pending?.division || 'Onbekend';
