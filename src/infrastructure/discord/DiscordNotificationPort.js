@@ -73,9 +73,13 @@ class DiscordNotificationPort {
     return new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
+        .setCustomId(IDS.STEWARD_CLOSE_INCIDENT)
+        .setLabel('Incident Afsluiten')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
         .setCustomId(`${IDS.FINALIZE_CHEATSHEET_TOGGLE_PREFIX}:${expanded ? 'hide' : 'show'}`)
         .setLabel(expanded ? 'Verberg cheatsheet' : 'Toon cheatsheet')
-        .setStyle(ButtonStyle.Danger)
+        .setStyle(ButtonStyle.Secondary)
     );
   }
 

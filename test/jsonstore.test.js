@@ -106,6 +106,10 @@ describe('JsonStore concurrency', () => {
         incidentSnapshot: { incidentNumber: 'INC-42' },
         expiresAt: Date.now() + 60000
       });
+      await store.setPendingStewardClosure('steward-2', {
+        incidentNumber: 'INC-42',
+        expiresAt: Date.now() + 60000
+      });
       await store.setPendingWithdrawal('reporter-1', {
         incidentNumber: 'INC-42',
         expiresAt: Date.now() + 60000
@@ -122,6 +126,7 @@ describe('JsonStore concurrency', () => {
       const votes = await store.getVotes('msg-42');
       const pendingEvidence = await store.getPendingEvidence('reporter-1');
       const pendingFinalization = await store.getPendingFinalization('steward-1');
+      const pendingStewardClosure = await store.getPendingStewardClosure('steward-2');
       const pendingWithdrawal = await store.getPendingWithdrawal('reporter-1');
       const pendingGuiltyReplies = await store.getPendingGuiltyRepliesByUser('guilty-1');
 
@@ -130,6 +135,7 @@ describe('JsonStore concurrency', () => {
       expect(votes).toEqual({});
       expect(pendingEvidence).toBeNull();
       expect(pendingFinalization).toBeNull();
+      expect(pendingStewardClosure).toBeNull();
       expect(pendingWithdrawal).toBeNull();
       expect(pendingGuiltyReplies).toBeNull();
     } finally {

@@ -29,6 +29,7 @@ class JsonStore {
         pendingIncidentReports: {},
         pendingAppeals: {},
         pendingFinalizations: {},
+        pendingStewardClosures: {},
         pendingGuiltyReplies: {},
         pendingWithdrawals: {}
       }
@@ -229,6 +230,7 @@ class JsonStore {
         'pendingIncidentReports',
         'pendingAppeals',
         'pendingFinalizations',
+        'pendingStewardClosures',
         'pendingWithdrawals'
       ];
 
@@ -441,6 +443,18 @@ class JsonStore {
 
   async deletePendingFinalization(userId) {
     return this.deletePendingByMap('pendingFinalizations', userId);
+  }
+
+  async getPendingStewardClosure(userId) {
+    return this.getPendingByMap('pendingStewardClosures', userId);
+  }
+
+  async setPendingStewardClosure(userId, payload) {
+    return this.setPendingByMap('pendingStewardClosures', userId, payload);
+  }
+
+  async deletePendingStewardClosure(userId) {
+    return this.deletePendingByMap('pendingStewardClosures', userId);
   }
 
   async getPendingWithdrawal(userId) {

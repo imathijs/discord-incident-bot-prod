@@ -261,9 +261,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(IDS.FINALIZE_VOTES).setLabel('Incident Afhandelen').setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
+        .setCustomId(IDS.STEWARD_CLOSE_INCIDENT)
+        .setLabel('Incident Afsluiten')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
         .setCustomId(`${IDS.FINALIZE_CHEATSHEET_TOGGLE_PREFIX}:${expanded ? 'hide' : 'show'}`)
         .setLabel(expanded ? 'Verberg cheatsheet' : 'Toon cheatsheet')
-        .setStyle(ButtonStyle.Danger)
+        .setStyle(ButtonStyle.Secondary)
     );
 
   const buildWithdrawReasonModal = ({ reasonText } = {}) => {
@@ -278,6 +282,24 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       .setRequired(false)
       .setMaxLength(1000);
     reasonInput.setPlaceholder('Waarom trek je het incident in?');
+    if (reasonText) reasonInput.setValue(reasonText);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+    return modal;
+  };
+
+  const buildStewardCloseReasonModal = ({ reasonText } = {}) => {
+    const modal = new ModalBuilder()
+      .setCustomId(IDS.STEWARD_CLOSE_REASON_MODAL)
+      .setTitle('Incident Afsluiten');
+
+    const reasonInput = new TextInputBuilder()
+      .setCustomId('reden')
+      .setLabel('Reden')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(1000)
+      .setPlaceholder('Waarom sluiten jullie dit incident af?');
     if (reasonText) reasonInput.setValue(reasonText);
 
     modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
@@ -1004,6 +1026,158 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return true;
   };
 
+  const closeIncidentBySteward = async ({ interaction, ticketNumber, reasonText }) => {
+    const normalizedTicket = normalizeTicketInput(ticketNumber);
+    let matchEntry = null;
+    const incidentFromStore = await store.getIncidentByNumber(normalizedTicket);
+    if (incidentFromStore?.id) {
+      matchEntry = [incidentFromStore.id, incidentFromStore];
+    }
+
+    if (!matchEntry) {
+      matchEntry = await recoverIncidentByNumber(ticketNumber);
+    }
+
+    if (!matchEntry) {
+      await interaction.reply({
+        content: '❌ Incident niet gevonden of al afgehandeld.',
+        flags: MessageFlags.Ephemeral
+      });
+      return true;
+    }
+
+    if (!isSteward(interaction.member)) {
+      await interaction.reply({
+        content: '❌ Alleen stewards kunnen een incident afsluiten.',
+        flags: MessageFlags.Ephemeral
+      });
+      return true;
+    }
+
+    const trimmedReason = String(reasonText || '').trim();
+    if (!trimmedReason) {
+      await interaction.reply({
+        content: '❌ Een reden is verplicht bij het afsluiten van een incident.',
+        flags: MessageFlags.Ephemeral
+      });
+      return true;
+    }
+
+    const [messageId, incidentData] = matchEntry;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const respond = (payload) =>
+      interaction.replied || interaction.deferred ? interaction.editReply(payload) : interaction.reply(payload);
+
+    const voteChannel = await fetchTextTargetChannel(client, incidentData?.threadId || config.voteChannelId);
+    if (!voteChannel) {
+      await respond({ content: '❌ Stem-kanaal niet gevonden! Check voteChannelId.' });
+      return true;
+    }
+
+    const voteMessage = await voteChannel.messages.fetch(messageId).catch(() => null);
+    const removeFinalizeMessages = async () => {
+      if (!voteChannel?.messages?.fetch) return;
+      const recent = await voteChannel.messages.fetch({ limit: 50 }).catch(() => null);
+      if (!recent?.size) return;
+      const toDelete = recent.filter((msg) =>
+        msg.components?.some((row) =>
+          row.components?.some((c) => c.customId === IDS.FINALIZE_VOTES || c.customId === IDS.STEWARD_CLOSE_INCIDENT)
+        )
+      );
+      for (const msg of toDelete.values()) {
+        if (msg.deletable) {
+          await msg.delete().catch(() => {});
+        }
+      }
+    };
+    const isResolved = voteChannel?.isThread?.() ? await threadHasResolution(voteChannel) : false;
+    if (isResolved) {
+      if (voteChannel?.isThread?.()) {
+        await voteChannel.send('❌ Incident kan niet meer worden afgesloten; incident is al afgehandeld.').catch(() => {});
+      }
+      await respond({
+        content: '❌ Incident kan niet meer worden afgesloten, het is al afgehandeld.',
+        flags: MessageFlags.Ephemeral
+      });
+      return true;
+    }
+    if (voteChannel?.isThread?.()) {
+      await removeFinalizeMessages();
+    }
+
+    const closedBy = interaction.user?.tag || 'Onbekend';
+
+    if (voteMessage) {
+      const baseEmbed = voteMessage.embeds[0]
+        ? EmbedBuilder.from(voteMessage.embeds[0])
+        : new EmbedBuilder().setTitle(`⛔ Incident ${incidentData.incidentNumber || 'Onbekend'}`);
+      const fields = [...(baseEmbed.data.fields ?? [])];
+      const statusIndex = fields.findIndex((f) => f.name === '🛑 Status' || f.name === '⛔ Status');
+      const statusField = {
+        name: '⛔ Status',
+        value: `Incident is afgesloten door steward ${closedBy}.\nReden: ${trimmedReason}`
+      };
+      if (statusIndex >= 0) {
+        fields[statusIndex] = statusField;
+      } else {
+        fields.push(statusField);
+      }
+      const currentTitle = String(baseEmbed.data.title || `Incident ${incidentData.incidentNumber || 'Onbekend'}`);
+      const updatedTitle = currentTitle
+        .replace(/^🚨\s*/, '⛔ ')
+        .replace(/^⚠️\s*/, '⛔ ')
+        .replace(/^✅\s*/, '⛔ ');
+      baseEmbed.setTitle(updatedTitle.startsWith('⛔') ? updatedTitle : `⛔ ${currentTitle}`);
+      baseEmbed.setColor('#777777').setFields(fields);
+      try {
+        await editMessageWithRetry(
+          voteMessage,
+          { embeds: [baseEmbed], components: [] },
+          'Steward close incident embed update',
+          { userId: interaction.user?.id }
+        );
+      } catch {}
+    }
+
+    if (voteChannel?.isThread?.()) {
+      const currentThreadName = String(voteChannel.name || '').trim();
+      let closedThreadName = currentThreadName;
+      if (currentThreadName.startsWith('⚠️')) closedThreadName = currentThreadName.replace(/^⚠️/, '⛔');
+      else if (currentThreadName.startsWith('✅')) closedThreadName = currentThreadName.replace(/^✅/, '⛔');
+      else if (currentThreadName.startsWith('🛑')) closedThreadName = currentThreadName.replace(/^🛑/, '⛔');
+      else if (!currentThreadName.startsWith('⛔')) closedThreadName = `⛔ ${currentThreadName}`;
+      if (closedThreadName && closedThreadName !== currentThreadName) {
+        await voteChannel.setName(closedThreadName.slice(0, 100)).catch(() => {});
+      }
+      const stewardRoleId = config.incidentStewardRoleId || config.stewardRoleId;
+      const stewardMention = stewardRoleId ? `<@&${stewardRoleId}>` : '@Incident steward';
+      await voteChannel
+        .send({
+          content: `⛔ ${stewardMention} - Incident is afgesloten door ${closedBy}.\nReden: ${trimmedReason}`
+        })
+        .catch(() => {});
+    }
+
+    try {
+      await updateIncidentStatus({
+        config,
+        rowNumber: incidentData.sheetRowNumber,
+        status: 'Afgesloten'
+      });
+    } catch (err) {
+      console.warn('Update incident status failed after steward closure', {
+        incidentNumber: incidentData.incidentNumber || 'Onbekend',
+        error: err?.message
+      });
+    }
+
+    await store.purgeIncident(messageId, incidentData.incidentNumber || ticketNumber);
+    await respond({
+      content: `✅ Incident **${ticketNumber}** is afgesloten en opgeruimd.`
+    });
+    return true;
+  };
+
   const handleSlashCommand = async (interaction) => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'raceincident') return false;
 
@@ -1535,6 +1709,33 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const reasonText = String(interaction.fields.getTextInputValue('reden') || '').trim();
       await store.deletePendingWithdrawal(interaction.user.id);
       return withdrawIncidentByNumber({
+        interaction,
+        ticketNumber: pending.incidentNumber,
+        reasonText
+      });
+    }
+
+    if (interaction.customId === IDS.STEWARD_CLOSE_REASON_MODAL) {
+      const pending = await store.getPendingStewardClosure(interaction.user.id);
+      if (!pending) {
+        await interaction.reply({ content: '❌ Geen open afsluit-actie gevonden.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (Date.now() > pending.expiresAt) {
+        await store.deletePendingStewardClosure(interaction.user.id);
+        await interaction.reply({ content: '❌ Tijd verlopen. Probeer opnieuw.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      if (!isSteward(interaction.member)) {
+        await store.deletePendingStewardClosure(interaction.user.id);
+        await interaction.reply({ content: '❌ Alleen stewards kunnen een incident afsluiten.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const reasonText = String(interaction.fields.getTextInputValue('reden') || '').trim();
+      await store.deletePendingStewardClosure(interaction.user.id);
+      return closeIncidentBySteward({
         interaction,
         ticketNumber: pending.incidentNumber,
         reasonText
@@ -2461,6 +2662,77 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
     }
     const isVoteMessage = !!incidentData;
+
+    if (id === IDS.STEWARD_CLOSE_INCIDENT && !isVoteMessage) {
+      if (!interaction.channel?.isThread?.()) {
+        await interaction.reply({
+          content: '❌ Afsluiten kan alleen vanuit het incident-thread.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      if (interaction.channelId !== config.voteChannelId && !isVoteThreadChannel(interaction.channel)) {
+        await interaction.reply({
+          content: '❌ Afsluiten kan alleen in het stem-kanaal.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      if (!isSteward(interaction.member)) {
+        await interaction.reply({
+          content: '❌ Alleen stewards kunnen een incident afsluiten.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      let resolvedIncident = null;
+      const starter = await interaction.channel.fetchStarterMessage().catch(() => null);
+      if (starter) {
+        const recovered = hydrateIncidentFromMessage(starter);
+        if (recovered) {
+          await store.saveIncident({ ...recovered, id: starter.id, status: 'OPEN' });
+          await store.setVotes(starter.id, recovered.votes || {});
+          resolvedIncident = recovered;
+        }
+      }
+
+      const ticketFromThread = extractIncidentNumberFromText(interaction.channel.name || '');
+      if (!resolvedIncident && ticketFromThread) {
+        const recoveredEntry = await recoverIncidentByNumber(ticketFromThread);
+        if (recoveredEntry) {
+          const [, incidentDataFromStore] = recoveredEntry;
+          resolvedIncident = incidentDataFromStore || null;
+        }
+      }
+
+      if (!resolvedIncident) {
+        const recovered = hydrateIncidentFromMessage(interaction.message);
+        if (recovered) {
+          await store.saveIncident({ ...recovered, id: interaction.message.id, status: 'OPEN' });
+          await store.setVotes(interaction.message.id, recovered.votes || {});
+          resolvedIncident = recovered;
+        }
+      }
+
+      if (!resolvedIncident?.incidentNumber) {
+        await interaction.reply({
+          content: '❌ Incident niet gevonden of al afgehandeld.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      await store.setPendingStewardClosure(interaction.user.id, {
+        incidentNumber: resolvedIncident.incidentNumber,
+        expiresAt: Date.now() + finalizeWindowMs
+      });
+
+      await interaction.showModal(buildStewardCloseReasonModal());
+      return true;
+    }
 
     if (id === IDS.FINALIZE_VOTES && !isVoteMessage) {
       if (!interaction.channel?.isThread?.()) {
