@@ -1,14 +1,16 @@
 # Uitleg DRE Race Incident Bot
 
 ## Algemene uitleg
-De DRE Race Incident Bot ondersteunt het hele incident‑proces in Discord. Rijders kunnen incidenten melden, bewijs uploaden en stewards kunnen stemmen en een besluit nemen. De schuldige rijder kan tijdens de behandeling éénmalig reageren via DM (binnen 2 dagen).
+De DRE Race Incident Bot ondersteunt het hele incident‑proces in Discord. Rijders kunnen incidenten melden, bewijs uploaden en stewards kunnen stemmen, afhandelen of een incident afsluiten. De schuldige rijder kan tijdens de behandeling éénmalig reageren via DM (binnen 2 dagen).
 
 De bot verzorgt:
 - een duidelijke meldflow voor incidenten;
 - een bewijs‑flow via DM;
 - een stemproces voor stewards;
+- een steward-flow om namens een gebruiker een incident te melden;
 - publicatie van uitslagen in het resolved kanaal (incl. divisie);
 - optionele logging van incidenten in Google Sheets (status wordt bijgewerkt bij afhandeling);
+- een steward-flow om een incident direct af te sluiten met reden;
 - een optionele DM‑reactie van de schuldige tijdens de behandeling.
 - blokkeert stemmen van stewards die betrokken zijn als indiener of tegenpartij (met opmerking bij het incident).
 
@@ -21,7 +23,8 @@ De bot verzorgt:
 6) Controleer je melding en bevestig.
 7) Het incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen. De divisie wordt meegegeven.
 8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs komt zichtbaar in de incident‑thread.
-9) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
+9) Stewards kunnen daarna stemmen, afhandelen of het incident afsluiten.
+10) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
 
 ## Schuldige rijder – reageren via DM (binnen 2 dagen)
 1) Je ontvangt een DM wanneer een incident is ingediend.
@@ -52,9 +55,21 @@ Wat er gebeurt:
 - Als het incident al is afgehandeld krijg je de melding dat terugnemen niet meer kan.
 
 ## Stewards (beheer)
+### Knoppen in een open incident
+Bij een open incident zien stewards deze beheerknoppen:
+- **Incident Afhandelen**: opent de normale eindoordeel-flow met preview en publicatie.
+- **Incident Afsluiten**: sluit het incident direct af met verplichte reden.
+- **Toon cheatsheet**: toont of verbergt de steward-cheatsheet.
+
 ### Stemregels bij betrokken stewards
 - Als een steward betrokken is als **indiener** of **tegenpartij**, mag die persoon niet stemmen.
 - Het incident krijgt dan een veld **⚠️ Opmerking** met deze melding (ook bij bestaande open threads na herstart).
+
+### Incident afhandelen
+- Gebruik dit wanneer er een volledig steward-besluit wordt gepubliceerd.
+- De bot toont eerst een voorvertoning.
+- Na bevestigen wordt het besluit in het resolved kanaal of de resolved thread geplaatst.
+- De betrokken rijders krijgen daarvan een DM.
 
 ### Incident terugnemen: wat gebeurt er?
 - Alleen de oorspronkelijke indiener mag een incident terugnemen.
@@ -63,6 +78,15 @@ Wat er gebeurt:
 - Als het incident nog open staat, krijgt de thread een bericht dat het incident is teruggetrokken.
 - Als het incident nog open staat, verdwijnt het incident uit de actieve incidentenlijst.
 - Als het incident nog open staat, verschijnt in het resolved kanaal een korte melding + embed met samenvatting.
+
+### Incident afsluiten: wat gebeurt er?
+- Alleen stewards kunnen dit uitvoeren.
+- De bot vraagt verplicht om een reden.
+- In het incident komt een statusveld te staan met die reden.
+- Het incident krijgt een **⛔** titel en de threadnaam krijgt ook **⛔**.
+- Stemknoppen en steward-controls verdwijnen uit het incident.
+- De achterliggende incident-state en stemmen worden opgeruimd.
+- Als Google Sheets logging actief is, wordt de status bijgewerkt naar **Afgesloten**.
 
 ## Configuratie
 De meeste instellingen staan in `config.json`:
@@ -95,6 +119,13 @@ Verder nodig:
 - **Message Content Intent** aanzetten in de Discord Developer Portal (nodig voor DM‑berichten).
 
 Details en setup: `DISCORD_CHEATSHEET.md`.
+
+## Belangrijke slash commands
+- `/raceincident melden`
+- `/raceincident stewardmelden`
+- `/raceincident intrekkenknop`
+- `/raceincident afhandelen ticketnummer:<INC-xxxxx>`
+- `/raceincident neemterug ticketnummer:<INC-xxxxx>`
 
 ## Infographic (Mermaid)
 ```mermaid

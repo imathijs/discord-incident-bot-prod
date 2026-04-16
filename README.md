@@ -1,6 +1,6 @@
 # DRE Race Incident Bot *Production*
 
-Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, stemmen door stewards, bewijs uploaden en afhandeling.
+Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, stemmen door stewards, bewijs uploaden, afhandeling, intrekken en steward‑afsluiting.
 
 ## Wat doet de bot?
 - Plaatst een meldknop in het meld‑kanaal.
@@ -8,7 +8,9 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 - Plaatst de melding als forum‑post in het stewards forumkanaal en maakt per incident een thread met stemknoppen.
 - Vraagt de melder om bewijs te uploaden (DM of kanaal).
 - Stuurt een DM naar de schuldige rijder om tijdens de behandeling éénmalig te reageren (binnen 2 dagen).
+- Laat stewards ook namens een gebruiker een incident melden.
 - Laat stewards stemmen en het eindoordeel publiceren.
+- Laat stewards een incident handmatig afsluiten met verplichte reden.
 - Publiceert afgehandelde incidenten in het resolved kanaal.
 - Logt incidenten optioneel extern in Google Sheets.
 - Blokkeert stemmen van stewards die betrokken zijn als indiener of tegenpartij en voegt een opmerking toe aan het incident.
@@ -19,7 +21,8 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 3) Incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen.
 4) Bewijs (uploads/links) wordt aan de incident‑thread toegevoegd.
 5) Schuldige ontvangt DM en kan tijdens de behandeling één keer reageren (max 2 dagen).
-6) Steward sluit af met eindoordeel; bot plaatst dit in het resolved kanaal.
+6) Steward handelt af met eindoordeel of sluit het incident handmatig af met reden.
+7) Bij afhandeling publiceert de bot het besluit in het resolved kanaal; bij afsluiten wordt het incident gesloten en opgeruimd.
 
 ## Stemregels (stewards)
 - Als een steward betrokken is als **indiener** of **tegenpartij**, kan die persoon niet stemmen.
@@ -44,6 +47,12 @@ Wat er gebeurt:
 - Als het incident al is afgehandeld krijg je de melding dat terugnemen niet meer kan.
 
 ## Stewards (beheer)
+### Steward-knoppen in een incident
+Bij een open incident staan in de steward-controls:
+- **Incident Afhandelen**: opent de eindoordeel-flow met preview.
+- **Incident Afsluiten**: sluit het incident direct af met verplichte reden.
+- **Toon cheatsheet**: klapt de steward-cheatsheet uit of in.
+
 ### Incident terugnemen: wat gebeurt er?
 - Alleen de oorspronkelijke indiener mag een incident terugnemen.
 - Als het incident al is afgehandeld, wordt terugnemen geweigerd en verschijnt er een melding in de thread.
@@ -52,12 +61,22 @@ Wat er gebeurt:
 - Als het incident nog open staat, verdwijnt het incident uit de actieve incidentenlijst.
 - Als het incident nog open staat, verschijnt in het resolved kanaal een korte melding + embed met samenvatting.
 
+### Incident afsluiten: wat gebeurt er?
+- Alleen stewards kunnen dit doen.
+- De knop **Incident Afsluiten** vraagt verplicht om een reden.
+- Het incident krijgt in de embed een statusveld met de reden van afsluiten.
+- De titel en threadnaam veranderen naar een **⛔** status.
+- Het stemsysteem en steward-controls worden verwijderd.
+- Alle gekoppelde incident-state, stemmen en workflow-verwijzingen worden opgeruimd.
+- In Google Sheets wordt de status bijgewerkt naar **Afgesloten** als sheet-logging actief is.
+
 ## Configuratie
 Niet-geheime Discord IDs staan in `config.json` (wordt bij startup schema-gevalideerd):
 - `reportChannelId` – kanaal waar de meldknop staat
 - `voteChannelId` – stewards forumkanaal met incident‑threads en stemmen
 - `stewardFinalizeChannelId` – kanaal-ID waar `/raceincident afhandelen` is toegestaan, inclusief alle threads daaronder (valt terug op `voteChannelId`)
 - `resolvedChannelId` – kanaal voor afgehandelde incidenten
+- `resolvedThreadId` – specifieke thread voor afgehandelde incidenten (optioneel, valt terug op `resolvedChannelId`)
 - `withdrawNoticeChannelId` – kanaal/thread voor melding bij terugnemen (leeg = niet posten)
 - `incidentChatChannelId` – kanaal waar @bot berichten terechtkomen
 - `stewardRoleId` – rol-ID voor stewards
@@ -110,6 +129,7 @@ Veilig guild-default gedrag:
 - Alleen in `NODE_ENV=development` mag fallback naar `config.json.allowedGuildId`.
 
 ## Belangrijke bestanden
+- `SKILL.md` – projectskill voor Codex met architectuur, flows en wijzigingsregels
 - `index.js` – entrypoint, registreert handlers
 - `src/infrastructure/discord/interaction.js` – incident workflow + stewards + DM aan schuldige
 - `src/infrastructure/discord/message.js` – bewijs uploads en DM‑reacties
@@ -143,6 +163,13 @@ Veilig guild-default gedrag:
 - `RequestAccusedResponse` – valideert wederwoord‑window → zet pending evidence
 - `AddEvidence` – valideert pending evidence + window → verwerkt upload
 - `WithdrawIncident` – valideert melder → trekt incident in
+
+## Slash commands (kort)
+- `/raceincident melden` – plaats meldknoppen in het meld-kanaal
+- `/raceincident stewardmelden` – steward maakt incident namens gebruiker
+- `/raceincident intrekkenknop` – plaats losse intrekknop in ingesteld kanaal
+- `/raceincident afhandelen ticketnummer:<INC-xxxxx>` – steward handelt incident af via command
+- `/raceincident neemterug ticketnummer:<INC-xxxxx>` – indiener trekt incident terug via command
 
 ## Tijdslimieten (in `src/constants.js`)
 - `evidenceWindowMs`
