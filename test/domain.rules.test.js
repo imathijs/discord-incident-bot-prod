@@ -75,4 +75,51 @@ describe('Domain rules', () => {
     expect(result.reporterPenaltyPoints).toBe(0);
     expect(result.finalTextValue).toBe('Besluit tekst');
   });
+
+  test('finalize uses category override only on tied highest vote count', async () => {
+    const finalizeIncident = new FinalizeIncident();
+    const incidentData = {
+      votes: {
+        a: { category: 'cat2', plus: false, minus: false, reporterCategory: 'cat1', reporterPlus: false, reporterMinus: false },
+        b: { category: 'cat3', plus: false, minus: false, reporterCategory: 'cat2', reporterPlus: false, reporterMinus: false },
+        c: { category: 'cat2', plus: false, minus: false, reporterCategory: 'cat1', reporterPlus: false, reporterMinus: false },
+        d: { category: 'cat3', plus: false, minus: false, reporterCategory: 'cat2', reporterPlus: false, reporterMinus: false }
+      }
+    };
+
+    const result = await finalizeIncident.execute({
+      incidentData,
+      finalText: 'Besluit tekst',
+      decisionOverrides: {
+        guilty: 'CAT4',
+        reporter: 'CAT5'
+      }
+    });
+
+    expect(result.decision).toBe('CAT4');
+    expect(result.reporterDecision).toBe('CAT5');
+  });
+
+  test('finalize ignores category override when there is a clear winner', async () => {
+    const finalizeIncident = new FinalizeIncident();
+    const incidentData = {
+      votes: {
+        a: { category: 'cat2', plus: false, minus: false, reporterCategory: 'cat1', reporterPlus: false, reporterMinus: false },
+        b: { category: 'cat2', plus: false, minus: false, reporterCategory: 'cat1', reporterPlus: false, reporterMinus: false },
+        c: { category: 'cat1', plus: false, minus: false, reporterCategory: 'cat3', reporterPlus: false, reporterMinus: false }
+      }
+    };
+
+    const result = await finalizeIncident.execute({
+      incidentData,
+      finalText: 'Besluit tekst',
+      decisionOverrides: {
+        guilty: 'CAT4',
+        reporter: 'CAT5'
+      }
+    });
+
+    expect(result.decision).toBe('CAT2');
+    expect(result.reporterDecision).toBe('CAT1');
+  });
 });

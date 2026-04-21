@@ -1,15 +1,20 @@
-const { buildTallyText, computePenaltyPoints, mostVotedCategory } = require('../../utils/votes');
+const { buildTallyText, computePenaltyPoints, resolveCategoryDecision } = require('../../utils/votes');
 
 class FinalizeIncident {
-  async execute({ incidentData, finalText }) {
+  async execute({ incidentData, finalText, decisionOverrides = {} }) {
     const tally = buildTallyText(incidentData.votes);
-    const winner = mostVotedCategory(incidentData.votes);
-    const decision = winner ? winner.toUpperCase() : 'CAT0';
+    const guiltyDecision = resolveCategoryDecision(incidentData.votes, {
+      overrideCategory: decisionOverrides.guilty
+    });
+    const decision = guiltyDecision.decision ? guiltyDecision.decision.toUpperCase() : 'CAT0';
     const penaltyPoints = computePenaltyPoints(incidentData.votes);
 
     const reporterTally = buildTallyText(incidentData.votes, 'reporter');
-    const reporterWinner = mostVotedCategory(incidentData.votes, 'reporter');
-    const reporterDecision = reporterWinner ? reporterWinner.toUpperCase() : 'CAT0';
+    const reporterDecisionResult = resolveCategoryDecision(incidentData.votes, {
+      prefix: 'reporter',
+      overrideCategory: decisionOverrides.reporter
+    });
+    const reporterDecision = reporterDecisionResult.decision ? reporterDecisionResult.decision.toUpperCase() : 'CAT0';
     const reporterPenaltyPoints = computePenaltyPoints(incidentData.votes, 'reporter');
 
     return {
@@ -19,7 +24,9 @@ class FinalizeIncident {
       reporterTally,
       reporterDecision,
       reporterPenaltyPoints,
-      finalTextValue: finalText
+      finalTextValue: finalText,
+      guiltyDecisionMeta: guiltyDecision,
+      reporterDecisionMeta: reporterDecisionResult
     };
   }
 }

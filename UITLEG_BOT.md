@@ -10,6 +10,7 @@ De bot verzorgt:
 - een steward-flow om namens een gebruiker een incident te melden;
 - publicatie van uitslagen in het resolved kanaal (incl. divisie);
 - optionele logging van incidenten in Google Sheets (status wordt bijgewerkt bij afhandeling);
+- een optionele CAT-override bij afhandeling voor gelijke hoogste stemstand;
 - een steward-flow om een incident direct af te sluiten met reden;
 - een optionele DM‑reactie van de schuldige tijdens de behandeling.
 - blokkeert stemmen van stewards die betrokken zijn als indiener of tegenpartij (met opmerking bij het incident).
@@ -68,6 +69,10 @@ Bij een open incident zien stewards deze beheerknoppen:
 ### Incident afhandelen
 - Gebruik dit wanneer er een volledig steward-besluit wordt gepubliceerd.
 - De bot toont eerst een voorvertoning.
+- In de modal kan optioneel een `CAT` worden ingevuld voor de dader en voor de indiener.
+- Dit is alleen bedoeld voor situaties waarin meerdere categorieen exact evenveel stemmen hebben op de hoogste stand.
+- Toegestane invoer is `CAT0` t/m `CAT5`.
+- Als er een duidelijke winnaar in de stemmen zit, negeert de bot deze override.
 - Na bevestigen wordt het besluit in het resolved kanaal of de resolved thread geplaatst.
 - De betrokken rijders krijgen daarvan een DM.
 

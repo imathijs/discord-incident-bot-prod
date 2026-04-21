@@ -10,6 +10,7 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 - Stuurt een DM naar de schuldige rijder om tijdens de behandeling éénmalig te reageren (binnen 2 dagen).
 - Laat stewards ook namens een gebruiker een incident melden.
 - Laat stewards stemmen en het eindoordeel publiceren.
+- Laat stewards bij afhandeling optioneel een CAT-override invullen voor dader en indiener bij gelijke hoogste stand.
 - Laat stewards een incident handmatig afsluiten met verplichte reden.
 - Publiceert afgehandelde incidenten in het resolved kanaal.
 - Logt incidenten optioneel extern in Google Sheets.
@@ -52,6 +53,13 @@ Bij een open incident staan in de steward-controls:
 - **Incident Afhandelen**: opent de eindoordeel-flow met preview.
 - **Incident Afsluiten**: sluit het incident direct af met verplichte reden.
 - **Toon cheatsheet**: klapt de steward-cheatsheet uit of in.
+
+### Incident afhandelen: CAT-override bij gelijke stand
+- In de afhandel-modal kunnen stewards optioneel een `CAT` invullen voor de **dader** en voor de **indiener**.
+- Toegestane waardes zijn alleen `CAT0`, `CAT1`, `CAT2`, `CAT3`, `CAT4` en `CAT5`.
+- Deze override wordt alleen gebruikt als meerdere categorieen exact evenveel stemmen hebben op de hoogste stand.
+- Als er wel een duidelijke winnaar is, wordt de override genegeerd en blijft de normale uitslag leidend.
+- De gekozen override wordt ook getoond in de voorvertoning van het eindoordeel.
 
 ### Incident terugnemen: wat gebeurt er?
 - Alleen de oorspronkelijke indiener mag een incident terugnemen.
@@ -159,7 +167,7 @@ Veilig guild-default gedrag:
 ## Use‑case flow (kort)
 - `CreateIncident` – verzamelt input → maakt incident thread + sheet row → start evidence/DM flows
 - `CastVote` – valideert stemmer (niet betrokken) → toggelt stem
-- `FinalizeIncident` – berekent uitslag + strafpunten → publiceert eindoordeel
+- `FinalizeIncident` – berekent uitslag + strafpunten, met optionele CAT-override bij gelijke stand → publiceert eindoordeel
 - `RequestAccusedResponse` – valideert wederwoord‑window → zet pending evidence
 - `AddEvidence` – valideert pending evidence + window → verwerkt upload
 - `WithdrawIncident` – valideert melder → trekt incident in
@@ -200,3 +208,11 @@ Veilig guild-default gedrag:
 4) Controleer `config.json` met je kanaal/rol IDs (geen secrets)
 5) Start de bot:
    - `node index.js`
+
+## Productie herstart (PM2)
+- Productie draait via PM2 met procesnaam `discord-bot-dre-prod`.
+- Herstart de bot met:
+  - `pm2 restart discord-bot-dre-prod`
+- Controleer de status met:
+  - `pm2 status discord-bot-dre-prod`
+- De PM2-config staat in `ecosystem.config.js`.

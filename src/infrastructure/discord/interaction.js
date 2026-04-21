@@ -21,7 +21,7 @@ const {
   finalizeWindowMs,
   guiltyReplyWindowMs
 } = require('../../constants');
-const { buildTallyText, computePenaltyPoints, mostVotedCategory } = require('../../utils/votes');
+const { buildTallyText, computePenaltyPoints, normalizeCategoryOverride } = require('../../utils/votes');
 const { buildEvidencePromptRow } = require('./evidenceUI');
 const { updateIncidentStatus, updateIncidentResolution } = require('../../utils/sheets');
 const { fetchTextTargetChannel, canSendToChannel } = require('../../utils/channels');
@@ -223,7 +223,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     }
   };
 
-  const buildFinalizeModal = ({ finalText, cat0Outcome } = {}) => {
+  const buildFinalizeModal = ({ finalText, cat0Outcome, guiltyCategoryOverride, reporterCategoryOverride } = {}) => {
     const modal = new ModalBuilder()
       .setCustomId(IDS.FINALIZE_MODAL)
       .setTitle('Eindoordeel toevoegen');
@@ -250,9 +250,33 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       cat0Input.setValue(cat0Outcome);
     }
 
+    const guiltyCategoryInput = new TextInputBuilder()
+      .setCustomId('dader_cat_override')
+      .setLabel('CAT dader bij gelijke stand (optioneel)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(4)
+      .setPlaceholder('CAT0 t/m CAT5');
+    if (guiltyCategoryOverride) {
+      guiltyCategoryInput.setValue(guiltyCategoryOverride);
+    }
+
+    const reporterCategoryInput = new TextInputBuilder()
+      .setCustomId('indiener_cat_override')
+      .setLabel('CAT indiener bij gelijke stand (optioneel)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(4)
+      .setPlaceholder('CAT0 t/m CAT5');
+    if (reporterCategoryOverride) {
+      reporterCategoryInput.setValue(reporterCategoryOverride);
+    }
+
     modal.addComponents(
       new ActionRowBuilder().addComponents(decisionInput),
-      new ActionRowBuilder().addComponents(cat0Input)
+      new ActionRowBuilder().addComponents(cat0Input),
+      new ActionRowBuilder().addComponents(guiltyCategoryInput),
+      new ActionRowBuilder().addComponents(reporterCategoryInput)
     );
     return modal;
   };
@@ -1764,8 +1788,22 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       let finalText = interaction.fields.getTextInputValue('eindoordeel').trim();
       const cat0Outcome = String(interaction.fields.getTextInputValue('cat0_uitkomst') || '').trim();
+      const guiltyCategoryOverrideInput = String(interaction.fields.getTextInputValue('dader_cat_override') || '').trim();
+      const reporterCategoryOverrideInput = String(interaction.fields.getTextInputValue('indiener_cat_override') || '').trim();
+      const guiltyCategoryOverride = normalizeCategoryOverride(guiltyCategoryOverrideInput);
+      const reporterCategoryOverride = normalizeCategoryOverride(reporterCategoryOverrideInput);
+      if (guiltyCategoryOverrideInput && !guiltyCategoryOverride) {
+        await interaction.editReply({ content: '❌ Ongeldige dader CAT. Gebruik alleen CAT0 t/m CAT5.' });
+        return true;
+      }
+      if (reporterCategoryOverrideInput && !reporterCategoryOverride) {
+        await interaction.editReply({ content: '❌ Ongeldige indiener CAT. Gebruik alleen CAT0 t/m CAT5.' });
+        return true;
+      }
       pending.finalText = finalText;
       pending.cat0Outcome = cat0Outcome;
+      pending.guiltyCategoryOverride = guiltyCategoryOverride ? guiltyCategoryOverride.toUpperCase() : '';
+      pending.reporterCategoryOverride = reporterCategoryOverride ? reporterCategoryOverride.toUpperCase() : '';
       pending.stage = 'preview';
       await store.setPendingFinalization(interaction.user.id, pending);
 
@@ -1816,6 +1854,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       if (cat0Outcome) {
         previewEmbed.addFields({ name: '🧩 CAT0 extra uitkomst', value: cat0Outcome });
+      }
+      if (pending.guiltyCategoryOverride) {
+        previewEmbed.addFields({
+          name: '🎛️ CAT override dader',
+          value: `${pending.guiltyCategoryOverride} (alleen gebruikt bij gelijke hoogste stand)`
+        });
+      }
+      if (pending.reporterCategoryOverride) {
+        previewEmbed.addFields({
+          name: '🎛️ CAT override indiener',
+          value: `${pending.reporterCategoryOverride} (alleen gebruikt bij gelijke hoogste stand)`
+        });
       }
 
       if (tally) {
@@ -1879,7 +1929,14 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       reporterDecision,
       reporterPenaltyPoints,
       finalTextValue
-    } = await finalizeIncident.execute({ incidentData, finalText });
+    } = await finalizeIncident.execute({
+      incidentData,
+      finalText,
+      decisionOverrides: {
+        guilty: pending.guiltyCategoryOverride,
+        reporter: pending.reporterCategoryOverride
+      }
+    });
     const cat0Outcome = String(pending.cat0Outcome || '').trim();
     const daderSanction = getSanctionText({ decision, penaltyPoints, cat0Outcome });
     const reporterSanction = getSanctionText({
@@ -2610,7 +2667,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         await interaction.showModal(
           buildFinalizeModal({
             finalText: pending.finalText || '',
-            cat0Outcome: pending.cat0Outcome || ''
+            cat0Outcome: pending.cat0Outcome || '',
+            guiltyCategoryOverride: pending.guiltyCategoryOverride || '',
+            reporterCategoryOverride: pending.reporterCategoryOverride || ''
           })
         );
         return true;

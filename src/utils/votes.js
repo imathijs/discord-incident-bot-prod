@@ -4,6 +4,22 @@ function readVoteValue(entry, prefix, key) {
   return entry[prop];
 }
 
+function buildCategoryCounts(votes, prefix = '') {
+  const counts = { cat0: 0, cat1: 0, cat2: 0, cat3: 0, cat4: 0, cat5: 0 };
+  for (const v of Object.values(votes)) {
+    const category = readVoteValue(v, prefix, 'category');
+    if (category && counts[category] !== undefined) counts[category]++;
+  }
+  return counts;
+}
+
+function normalizeCategoryOverride(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  return /^cat[0-5]$/.test(normalized) ? normalized : null;
+}
+
 function computePenaltyPoints(votes, prefix = '') {
   let penaltyPoints = 0;
   for (const v of Object.values(votes)) {
@@ -14,12 +30,8 @@ function computePenaltyPoints(votes, prefix = '') {
 }
 
 function buildTallyText(votes, prefix = '') {
-  const catCount = { cat0: 0, cat1: 0, cat2: 0, cat3: 0, cat4: 0, cat5: 0 };
+  const catCount = buildCategoryCounts(votes, prefix);
   const penaltyPoints = computePenaltyPoints(votes, prefix);
-  for (const v of Object.values(votes)) {
-    const category = readVoteValue(v, prefix, 'category');
-    if (category && catCount[category] !== undefined) catCount[category]++;
-  }
 
   const lines = [
     `CAT0: ${catCount.cat0}`,
@@ -36,21 +48,48 @@ function buildTallyText(votes, prefix = '') {
 }
 
 function mostVotedCategory(votes, prefix = '') {
-  const counts = { cat0: 0, cat1: 0, cat2: 0, cat3: 0, cat4: 0, cat5: 0 };
-
-  for (const v of Object.values(votes)) {
-    const category = readVoteValue(v, prefix, 'category');
-    if (category && counts[category] !== undefined) counts[category]++;
-  }
-
+  const counts = buildCategoryCounts(votes, prefix);
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   const [winner, voteCount] = sorted[0];
   if (!voteCount || voteCount === 0) return null;
   return winner;
 }
 
+function resolveCategoryDecision(votes, { prefix = '', overrideCategory } = {}) {
+  const counts = buildCategoryCounts(votes, prefix);
+  const highestVoteCount = Math.max(...Object.values(counts));
+  const winners = Object.entries(counts)
+    .filter(([, count]) => count === highestVoteCount)
+    .map(([category]) => category);
+  const hasTie = winners.length > 1;
+  const normalizedOverride = normalizeCategoryOverride(overrideCategory);
+  const winner = highestVoteCount > 0 && !hasTie ? winners[0] : null;
+
+  if (hasTie && normalizedOverride) {
+    return {
+      counts,
+      highestVoteCount,
+      winners,
+      hasTie,
+      usedOverride: true,
+      decision: normalizedOverride
+    };
+  }
+
+  return {
+    counts,
+    highestVoteCount,
+    winners,
+    hasTie,
+    usedOverride: false,
+    decision: winner
+  };
+}
+
 module.exports = {
   buildTallyText,
   computePenaltyPoints,
-  mostVotedCategory
+  mostVotedCategory,
+  normalizeCategoryOverride,
+  resolveCategoryDecision
 };
