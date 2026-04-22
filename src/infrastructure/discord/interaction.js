@@ -175,36 +175,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return catColors[normalized] || '#1068ec';
   };
 
-  const getCatLevel = (decision) => {
+  const formatDecisionLabel = ({ decision }) => {
     const normalized = String(decision || '').trim().toUpperCase();
-    const match = normalized.match(/^CAT([0-5])$/);
-    if (!match) return null;
-    return Number(match[1]);
+    return normalized || 'Onbekend';
   };
 
-  const toCatLabel = (level) => {
-    if (!Number.isInteger(level)) return null;
-    if (level < 0 || level > 5) return null;
-    return `CAT${level}`;
-  };
-
-  const getEffectiveDecisionForSanction = ({ decision, penaltyPoints }) => {
-    const base = getCatLevel(decision);
-    if (base === null) return String(decision || '').trim().toUpperCase();
-    const offset = Number(penaltyPoints) || 0;
-    const adjusted = Math.min(5, Math.max(0, base + offset));
-    return toCatLabel(adjusted);
-  };
-
-  const formatDecisionWithShift = ({ decision, penaltyPoints }) => {
+  const getSanctionText = ({ decision, cat0Outcome }) => {
     const normalized = String(decision || '').trim().toUpperCase();
-    const effective = getEffectiveDecisionForSanction({ decision: normalized, penaltyPoints });
-    if (!normalized || normalized === effective) return normalized || 'Onbekend';
-    return `${normalized} (straf als ${effective})`;
-  };
-
-  const getSanctionText = ({ decision, penaltyPoints, cat0Outcome }) => {
-    const normalized = getEffectiveDecisionForSanction({ decision, penaltyPoints });
     switch (normalized) {
       case 'CAT0':
         return String(cat0Outcome || 'No further action').trim();
@@ -219,7 +196,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       case 'CAT5':
         return '60 seconden tijdstraf + 5 strafpunten';
       default:
-        return `${penaltyPoints ?? 0} strafpunten`;
+        return 'Onbekend';
     }
   };
 
@@ -1938,17 +1915,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
     });
     const cat0Outcome = String(pending.cat0Outcome || '').trim();
-    const daderSanction = getSanctionText({ decision, penaltyPoints, cat0Outcome });
+    const daderSanction = getSanctionText({ decision, cat0Outcome });
     const reporterSanction = getSanctionText({
       decision: reporterDecision,
-      penaltyPoints: reporterPenaltyPoints,
       cat0Outcome: ''
     });
-    const daderDecisionDisplay = formatDecisionWithShift({ decision, penaltyPoints });
-    const reporterDecisionDisplay = formatDecisionWithShift({
-      decision: reporterDecision,
-      penaltyPoints: reporterPenaltyPoints
-    });
+    const daderDecisionDisplay = formatDecisionLabel({ decision });
+    const reporterDecisionDisplay = formatDecisionLabel({ decision: reporterDecision });
 
     const threadReporterLabel = await formatUserLabel(incidentData.reporter, voteChannel.guild);
     const threadGuiltyLabel = await formatUserLabel(incidentData.guiltyDriver, voteChannel.guild);
