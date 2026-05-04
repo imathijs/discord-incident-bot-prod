@@ -4,7 +4,7 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 
 ## Wat doet de bot?
 - Plaatst een meldknop in het meld‑kanaal.
-- Laat rijders een incident indienen via een begeleide flow (divisie → reden → schuldige → race/ronde/bocht → beschrijving).
+- Laat rijders een incident indienen via een begeleide flow (klasse → divisie → reden → schuldige → race/ronde/bocht → beschrijving).
 - Plaatst de melding als forum‑post in het stewards forumkanaal en maakt per incident een thread met stemknoppen.
 - Vraagt de melder om bewijs te uploaden (DM of kanaal).
 - Stuurt een DM naar de schuldige rijder om tijdens de behandeling éénmalig te reageren (binnen 2 dagen).
@@ -18,8 +18,8 @@ Deze Discord‑bot ondersteunt het volledige race‑incident proces: melden, ste
 
 ## Hoofdflow (kort)
 1) `raceincident melden` plaatst de meldknop in het meld‑kanaal.
-2) Melder kiest divisie + reden + schuldige, vult race/ronde/bocht/beschrijving in en bevestigt.
-3) Incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen.
+2) Melder kiest klasse + divisie + reden + schuldige, vult race/ronde/bocht/beschrijving in en bevestigt.
+3) Incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen, inclusief klasse en divisie.
 4) Bewijs (uploads/links) wordt aan de incident‑thread toegevoegd.
 5) Schuldige ontvangt DM en kan tijdens de behandeling één keer reageren (max 2 dagen).
 6) Steward handelt af met eindoordeel of sluit het incident handmatig af met reden.
@@ -145,7 +145,7 @@ Veilig guild-default gedrag:
 - `src/domain/` – entities + policies + domain errors
 - `src/infrastructure/discord/DiscordNotificationPort.js` – Discord adapter (threads, embeds, DMs)
 - `src/infrastructure/persistence/` – state/sheets adapters
-- `src/constants.js` – tijdslimieten en incident‑redenen
+- `src/constants.js` – tijdslimieten, incident‑redenen en configureerbare raceklassen
 - `src/config/index.js` – centrale config loader (env + config.json + schema)
 - `src/config/schema.js` – Joi schema-validatie
 
@@ -184,6 +184,11 @@ Veilig guild-default gedrag:
 - `incidentReportWindowMs`
 - `finalizeWindowMs`
 - `guiltyReplyWindowMs`
+
+## Raceklassen aanpassen
+- De beschikbare raceklassen staan centraal in `src/constants.js` als `raceClasses`.
+- Pas daar `label`, `value` en `style` aan als de seizoensindeling verandert.
+- `style: 'primary'` geeft een standaard blauwe knop, `style: 'danger'` geeft een rode knop.
 
 ## Cheatsheets
 <details>

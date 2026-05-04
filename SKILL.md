@@ -43,6 +43,7 @@ De bot ondersteunt het volledige incidentproces:
 4. Evidence en DM-follow-up worden gestart.
 
 Bij wijzigingen aan de meldflow moet je meestal zowel `interaction.js` als `DiscordNotificationPort.js` controleren.
+De configureerbare lijst met raceklassen staat centraal in `src/constants.js` als `raceClasses`.
 
 ### Stemmen en afhandelen
 
@@ -91,6 +92,7 @@ Bij wijzigingen aan steward-controls moet je zowel de builder in `interaction.js
 Werk bij flowwijzigingen meestal ook deze bestanden bij:
 - `README.md`
 - `UITLEG_BOT.md`
+- `SKILL.md` zelf als de leidende flow of projectregels veranderen
 - eventueel `DISCORD_CHEATSHEET.md` of `GOOGLE_SHEETS_CHEATSHEET.md` als permissies of sheetgedrag veranderen.
 
 ## Validatie

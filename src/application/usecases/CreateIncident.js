@@ -40,6 +40,7 @@ class CreateIncident {
       throw new DomainError('Reporter cannot be guilty driver', 'SELF_CULPRIT');
     }
 
+    const raceClass = pending?.raceClass || 'Onbekend';
     const division = pending?.division || 'Onbekend';
     const corner = pending?.corner || '';
     const reasonLabel = pending?.reasonLabel || pending?.reasonValue || 'Onbekend';
@@ -50,6 +51,7 @@ class CreateIncident {
 
     const { threadId, messageId } = await this.notificationPort.createIncidentThread({
       incidentNumber,
+      raceClass,
       division,
       raceName,
       round,
@@ -80,6 +82,7 @@ class CreateIncident {
     const incident = {
       id: messageId,
       incidentNumber,
+      raceClass,
       division,
       raceName,
       round,

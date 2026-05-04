@@ -14,6 +14,7 @@ const {
 } = require('discord.js');
 const {
   incidentReasons,
+  raceClasses,
   evidenceButtonIds,
   evidenceWindowMs,
   incidentReportWindowMs,
@@ -476,6 +477,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return {
       votes,
       incidentNumber,
+      raceClass: getEmbedFieldValue(embed, 'Klasse') || 'Onbekend',
       division: getEmbedFieldValue(embed, '🏁 Divisie') || 'Onbekend',
       raceName: getEmbedFieldValue(embed, '🏁 Race') || 'Onbekend',
       round: getEmbedFieldValue(embed, '🔢 Ronde') || 'Onbekend',
@@ -661,6 +663,16 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return modal;
   };
 
+  const buildClassRow = (prefix = IDS.INCIDENT_CLASS_PREFIX) =>
+    new ActionRowBuilder().addComponents(
+      ...raceClasses.map((raceClass) =>
+        new ButtonBuilder()
+          .setCustomId(`${prefix}:${raceClass.value}`)
+          .setLabel(raceClass.label)
+          .setStyle(raceClass.style === 'danger' ? ButtonStyle.Danger : ButtonStyle.Primary)
+      )
+    );
+
   const buildDivisionRow = (prefix = IDS.INCIDENT_DIVISION_PREFIX) =>
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`${prefix}:div1`).setLabel('Div 1').setStyle(ButtonStyle.Primary),
@@ -688,8 +700,12 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return rows;
   };
 
+  const getRaceClassLabel = (value) =>
+    raceClasses.find((raceClass) => raceClass.value === value)?.label || 'Onbekend';
+
   const buildIncidentReviewEmbed = ({
     incidentNumber,
+    raceClass,
     division,
     raceName,
     round,
@@ -707,6 +723,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         { name: '👤 Ingediend door', value: reporterTag || 'Onbekend', inline: true },
         { name: '⚠️ Schuldige rijder', value: guiltyMention || 'Onbekend', inline: true },
         { name: '📌 Reden', value: reasonLabel || 'Onbekend', inline: false },
+        { name: 'Klasse', value: raceClass || 'Onbekend', inline: true },
         { name: '🏁 Divisie', value: division || 'Onbekend', inline: true },
         { name: '🏁 Race', value: raceName || 'Onbekend', inline: true },
         { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
@@ -992,6 +1009,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         )
         .addFields(
           { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
+          { name: 'Klasse', value: incidentData.raceClass || 'Onbekend', inline: true },
           { name: '🏁 Divisie', value: incidentData.division || 'Onbekend', inline: true },
           { name: '🏁 Race', value: incidentData.raceName || 'Onbekend', inline: true },
           { name: '🔢 Ronde', value: incidentData.round || 'Onbekend', inline: true },
@@ -1543,6 +1561,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       const reviewEmbed = buildIncidentReviewEmbed({
         incidentNumber: pending.incidentNumber,
+        raceClass: pending.raceClass,
         division: pending.division,
         raceName,
         round,
@@ -1820,6 +1839,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         .setDescription(`**Eindoordeel**\n${finalText || '*Geen tekst*'}`)
         .addFields(
           { name: '🔢 Incidentnummer', value: incidentData?.incidentNumber || 'Onbekend', inline: true },
+          { name: 'Klasse', value: incidentData?.raceClass || 'Onbekend', inline: true },
           { name: '🏁 Divisie', value: incidentData?.division || 'Onbekend', inline: true },
           { name: '🏁 Race', value: incidentData?.raceName || 'Onbekend', inline: true },
           { name: '🔢 Ronde', value: incidentData?.round || 'Onbekend', inline: true },
@@ -1934,6 +1954,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       )
       .addFields(
         { name: '🔢 Incidentnummer', value: incidentData.incidentNumber || 'Onbekend', inline: true },
+        { name: 'Klasse', value: incidentData.raceClass || 'Onbekend', inline: true },
         { name: '🏁 Divisie', value: incidentData.division || 'Onbekend', inline: true },
         { name: '🏁 Race', value: incidentData.raceName, inline: true },
         { name: '⚠️ Rijder', value: threadGuiltyLabel || 'Onbekend', inline: true },
@@ -2000,6 +2021,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
             '',
             '**🧾 Samenvatting**',
             `Incidentnummer: **${incidentData.incidentNumber || 'Onbekend'}**`,
+            `Klasse: **${incidentData.raceClass || 'Onbekend'}**`,
             `Divisie: **${incidentData.division || 'Onbekend'}**`,
             `Race: **${incidentData.raceName}**  •  Ronde: **${incidentData.round}**`,
             `Ingediend door: **${incidentData.reporter || 'Onbekend'}**`,
@@ -2201,11 +2223,11 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
-      const divisionRow = buildDivisionRow();
+      const classRow = buildClassRow();
 
       await interaction.reply({
-        content: 'In welke divisie rij je?',
-        components: [divisionRow],
+        content: 'Welke race klasse?',
+        components: [classRow],
         flags: MessageFlags.Ephemeral
       });
       return true;
@@ -2235,10 +2257,10 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         expiresAt: Date.now() + incidentReportWindowMs
       });
 
-      const divisionRow = buildDivisionRow(IDS.STEWARD_INCIDENT_DIVISION_PREFIX);
+      const classRow = buildClassRow(IDS.STEWARD_INCIDENT_CLASS_PREFIX);
       await interaction.reply({
-        content: 'Welke divisie?',
-        components: [divisionRow],
+        content: 'Welke race klasse?',
+        components: [classRow],
         flags: MessageFlags.Ephemeral
       });
       return true;
@@ -2285,7 +2307,75 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return true;
     }
 
-    // 2b) Divisie selecteren: daarna reden knoppen tonen
+    // 2b) Klasse selecteren: daarna divisie knoppen tonen
+    if (id.startsWith(`${IDS.INCIDENT_CLASS_PREFIX}:`)) {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const classValue = interaction.customId.split(':')[1] || '';
+      const raceClass = getRaceClassLabel(classValue);
+
+      const existing = await store.getPendingIncidentReport(interaction.user.id);
+      await store.setPendingIncidentReport(interaction.user.id, {
+        ...(existing || {}),
+        raceClass,
+        reporterTag: interaction.user.tag,
+        reporterId: interaction.user.id,
+        guildId: interaction.guildId,
+        expiresAt: Date.now() + incidentReportWindowMs
+      });
+
+      const divisionRow = buildDivisionRow();
+      await interaction.update({
+        content: 'In welke divisie rij je?',
+        components: [divisionRow]
+      });
+      return true;
+    }
+
+    // 2b-steward) Klasse selecteren: daarna divisie knoppen tonen
+    if (id.startsWith(`${IDS.STEWARD_INCIDENT_CLASS_PREFIX}:`)) {
+      if (interaction.channelId !== stewardIncidentThreadId) {
+        await interaction.reply({
+          content: '❌ Stewardmelding kan alleen in de ingestelde steward-thread.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+      if (!isSteward(interaction.member)) {
+        await interaction.reply({
+          content: '❌ Alleen stewards kunnen namens een gebruiker melden.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
+
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
+      if (!pending || pending.source !== 'steward') {
+        await interaction.reply({ content: '❌ Sessie verlopen. Start opnieuw.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const classValue = interaction.customId.split(':')[1] || '';
+      const raceClass = getRaceClassLabel(classValue);
+
+      await store.setPendingIncidentReport(interaction.user.id, {
+        ...pending,
+        raceClass,
+        expiresAt: Date.now() + incidentReportWindowMs
+      });
+
+      const divisionRow = buildDivisionRow(IDS.STEWARD_INCIDENT_DIVISION_PREFIX);
+      await interaction.update({
+        content: 'Welke divisie?',
+        components: [divisionRow]
+      });
+      return true;
+    }
+
+    // 2c) Divisie selecteren: daarna reden knoppen tonen
     if (id.startsWith(`${IDS.INCIDENT_DIVISION_PREFIX}:`)) {
       if (!interaction.guildId) {
         await interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', flags: MessageFlags.Ephemeral });
@@ -2319,7 +2409,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return true;
     }
 
-    // 2b-steward) Divisie selecteren: daarna reporter kiezen
+    // 2c-steward) Divisie selecteren: daarna reporter kiezen
     if (id.startsWith(`${IDS.STEWARD_INCIDENT_DIVISION_PREFIX}:`)) {
       if (interaction.channelId !== stewardIncidentThreadId) {
         await interaction.reply({

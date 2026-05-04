@@ -3,6 +3,7 @@ class Incident {
     this.id = props?.id || null;
     this.incidentNumber = props?.incidentNumber || null;
     this.status = props?.status || 'open';
+    this.raceClass = props?.raceClass || null;
     this.division = props?.division || null;
     this.raceName = props?.raceName || null;
     this.round = props?.round || null;

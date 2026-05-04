@@ -1,6 +1,8 @@
 module.exports = {
   REPORT_INCIDENT: 'report_incident',
   STEWARD_REPORT_INCIDENT: 'steward_report_incident',
+  INCIDENT_CLASS_PREFIX: 'incident_class',
+  STEWARD_INCIDENT_CLASS_PREFIX: 'steward_incident_class',
   INCIDENT_DIVISION_PREFIX: 'incident_division',
   STEWARD_INCIDENT_DIVISION_PREFIX: 'steward_incident_division',
   INCIDENT_REASON_PREFIX: 'incident_reason',

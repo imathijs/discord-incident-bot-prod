@@ -10,6 +10,13 @@ const incidentReasons = [
   { label: 'Anders', value: 'anders' }
 ];
 
+const raceClasses = [
+  { label: 'Gr3', value: 'gr3', style: 'primary' },
+  { label: 'Gr2-GT500', value: 'gr2_gt500', style: 'primary' },
+  { label: 'mx5-cup', value: 'mx5_cup', style: 'primary' },
+  { label: 'endurance', value: 'endurance', style: 'danger' }
+];
+
 const evidenceButtonIds = {
   more: 'evidence_more',
   done: 'evidence_done',
@@ -25,6 +32,7 @@ const guiltyReplyWindowMs = 2 * 24 * 60 * 60 * 1000;
 
 module.exports = {
   incidentReasons,
+  raceClasses,
   evidenceButtonIds,
   evidenceWindowMs,
   incidentReportWindowMs,

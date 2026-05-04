@@ -8,7 +8,7 @@ De bot verzorgt:
 - een bewijs‑flow via DM;
 - een stemproces voor stewards;
 - een steward-flow om namens een gebruiker een incident te melden;
-- publicatie van uitslagen in het resolved kanaal (incl. divisie);
+- publicatie van uitslagen in het resolved kanaal (incl. klasse en divisie);
 - optionele logging van incidenten in Google Sheets (status wordt bijgewerkt bij afhandeling);
 - een optionele CAT-override bij afhandeling voor gelijke hoogste stemstand;
 - een steward-flow om een incident direct af te sluiten met reden;
@@ -17,15 +17,16 @@ De bot verzorgt:
 
 ## Incident melder – stappen
 1) Ga naar het meld‑kanaal en klik op **Meld Incident**.
-2) Geef aan in welke divisie je rijdt: **Div 1**, **Div 2**, **Div 3**, **Div 4**.
-3) Kies de reden van het incident.
-4) Selecteer de schuldige rijder.
-5) Vul race‑nummer, ronde, bocht en beschrijving in.
-6) Controleer je melding en bevestig.
-7) Het incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen. De divisie wordt meegegeven.
-8) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs komt zichtbaar in de incident‑thread.
-9) Stewards kunnen daarna stemmen, afhandelen of het incident afsluiten.
-10) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief divisie.
+2) Kies je raceklasse: **Gr3**, **Gr2-GT500**, **mx5-cup** of **endurance**.
+3) Geef aan in welke divisie je rijdt: **Div 1**, **Div 2**, **Div 3**, **Div 4**.
+4) Kies de reden van het incident.
+5) Selecteer de schuldige rijder.
+6) Vul race‑nummer, ronde, bocht en beschrijving in.
+7) Controleer je melding en bevestig.
+8) Het incident verschijnt als forum‑post in het stewards forumkanaal met een eigen thread + stemknoppen. De klasse en divisie worden meegegeven.
+9) Je ontvangt een DM om bewijs te uploaden (link of bijlage). Dit bewijs komt zichtbaar in de incident‑thread.
+10) Stewards kunnen daarna stemmen, afhandelen of het incident afsluiten.
+11) Na het eindoordeel verschijnt de uitslag in het resolved kanaal, inclusief klasse en divisie.
 
 ## Schuldige rijder – reageren via DM (binnen 2 dagen)
 1) Je ontvangt een DM wanneer een incident is ingediend.
@@ -108,6 +109,11 @@ De meeste instellingen staan in `config.json`:
 - `incidentCounter` – teller voor incidentnummers (`INC-xxxxx`)
 - `autoDeleteHours` – auto‑delete van DM‑berichten/opties
 
+## Raceklassen aanpassen
+- De beschikbare raceklassen staan centraal in `src/constants.js` als `raceClasses`.
+- Daar kun je per klasse de zichtbare naam (`label`), interne waarde (`value`) en knopkleur (`style`) aanpassen.
+- `primary` betekent standaard blauw, `danger` betekent rood.
+
 ## Discord‑rechten (bot)
 Minimale rechten bij het uitnodigen van de bot (OAuth2):
 - View Channels
@@ -136,14 +142,15 @@ Details en setup: `DISCORD_CHEATSHEET.md`.
 ```mermaid
 flowchart LR
   A[Incident melder] --> B[Meld incident via knop]
-  B --> C[Kies divisie (Div 1-4)]
-  C --> D[Kies reden + schuldige]
-  D --> E[Vul race/ronde/bocht/beschrijving]
-  E --> F[Bevestig + upload bewijs (DM)]
-  F --> G[Forum post + incident thread]
-  G --> H[Bewijs naar incident thread]
-  H --> I[Stemmen + eindoordeel + divisie]
-  I --> J[Resolved kanaal + divisie]
+  B --> C[Kies klasse (Gr3/Gr2-GT500/mx5-cup/endurance)]
+  C --> D[Kies divisie (Div 1-4)]
+  D --> E[Kies reden + schuldige]
+  E --> F[Vul race/ronde/bocht/beschrijving]
+  F --> G[Bevestig + upload bewijs (DM)]
+  G --> H[Forum post + incident thread]
+  H --> I[Bewijs naar incident thread]
+  I --> J[Stemmen + eindoordeel + klasse/divisie]
+  J --> K[Resolved kanaal + klasse/divisie]
 ```
 
 ## Infographic (SVG)

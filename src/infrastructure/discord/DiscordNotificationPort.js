@@ -85,6 +85,7 @@ class DiscordNotificationPort {
 
   buildIncidentEmbed({
     incidentNumber,
+    raceClass,
     division,
     raceName,
     round,
@@ -99,6 +100,7 @@ class DiscordNotificationPort {
   }) {
     const fields = [
       { name: '👤 Ingediend door', value: reporterMention || 'Onbekend', inline: true },
+      { name: 'Klasse', value: raceClass || 'Onbekend', inline: true },
       { name: '🏁 Divisie', value: division || 'Onbekend', inline: true },
       { name: '🏁 Race', value: raceName || 'Onbekend', inline: true },
       { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
@@ -135,6 +137,7 @@ class DiscordNotificationPort {
 
     const {
       incidentNumber,
+      raceClass,
       division,
       raceName,
       round,
@@ -161,6 +164,7 @@ class DiscordNotificationPort {
 
     const incidentEmbed = this.buildIncidentEmbed({
       incidentNumber,
+      raceClass,
       division,
       raceName,
       round,
@@ -191,7 +195,9 @@ class DiscordNotificationPort {
       thread = await forumChannel.threads.create({
         name: threadName,
         message: {
-          content: `<@&${this.config.stewardRoleId}> - Incident ${incidentNumber} gemeld door ${reporterTag}`,
+          content:
+            `<@&${this.config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ` +
+            `${raceClass} - ${division} - ${raceName} (${round}) - Door ${reporterTag}`,
           embeds: [incidentEmbed],
           components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
         }
@@ -210,7 +216,9 @@ class DiscordNotificationPort {
     let message = await thread.fetchStarterMessage().catch(() => null);
     if (!message) {
       message = await thread.send({
-        content: `<@&${this.config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ${division} - ${raceName} (${round}) - Door ${reporterTag}`,
+        content:
+          `<@&${this.config.stewardRoleId}> - Incident ${incidentNumber} gemeld - ` +
+          `${raceClass} - ${division} - ${raceName} (${round}) - Door ${reporterTag}`,
         embeds: [incidentEmbed],
         components: [voteButtons, voteButtonsRow2, reporterSeparatorRow, reporterButtons, reporterButtonsRow2]
       });
