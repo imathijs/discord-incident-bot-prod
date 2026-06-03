@@ -33,7 +33,9 @@ class CreateIncident {
     const description = pending?.description;
     const reporterId = pending?.reporterId;
     const guiltyId = pending?.guiltyId;
-    if (!raceName || !round || !description) {
+    const submitterId = pending?.submitterId || pendingOwnerId || reporterId;
+    const submitterTag = pending?.submitterTag || pending?.stewardTag || null;
+    if (!raceName || !round || !description || !reporterId || !guiltyId) {
       throw new DomainError('Missing incident fields', 'MISSING_FIELDS');
     }
     if (reporterId && guiltyId && reporterId === guiltyId) {
@@ -62,6 +64,8 @@ class CreateIncident {
       guiltyTag: pending?.guiltyTag,
       reporterId: pending?.reporterId,
       reporterTag,
+      submitterId,
+      submitterTag,
       stewardNote
     });
 
@@ -92,6 +96,8 @@ class CreateIncident {
       reason: reasonLabel,
       reporter: reporterTag,
       reporterId: pending?.reporterId,
+      submitterId,
+      submitterTag,
       votes: {},
       threadId,
       status: 'OPEN',
@@ -161,16 +167,29 @@ class CreateIncident {
       } catch {}
     }
 
-    await this.workflowState.setPendingEvidence(evidenceUserId, {
-      messageId,
-      voteThreadId: threadId,
-      channelId: evidenceChannelId,
-      expiresAt: this.clock.now() + evidenceWindowMs,
-      type: 'incident',
-      incidentNumber,
-      botMessageIds,
-      promptMessageId
-    });
+    if (evidenceUserId) {
+      await this.workflowState.setPendingEvidence(evidenceUserId, {
+        messageId,
+        voteThreadId: threadId,
+        channelId: evidenceChannelId,
+        expiresAt: this.clock.now() + evidenceWindowMs,
+        type: 'incident',
+        incidentNumber,
+        botMessageIds,
+        promptMessageId
+      });
+    }
+
+    if (submitterId && submitterId !== evidenceUserId && this.notificationPort.sendSubmitterConfirmationDm) {
+      try {
+        await this.notificationPort.sendSubmitterConfirmationDm({
+          submitterId,
+          content:
+            `✅ Je hebt een incident gemeld onder ticket **${incidentNumber}**.\n` +
+            'De betrokken rijders ontvangen de verdere meldingen.'
+        });
+      } catch {}
+    }
 
     if (pendingOwnerId) {
       await this.workflowState.clearPendingIncidentReport(pendingOwnerId);

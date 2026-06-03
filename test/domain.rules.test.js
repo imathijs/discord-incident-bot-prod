@@ -1,6 +1,7 @@
 const { CastVote } = require('../src/application/usecases/CastVote');
 const { RequestAccusedResponse } = require('../src/application/usecases/RequestAccusedResponse');
 const { FinalizeIncident } = require('../src/application/usecases/FinalizeIncident');
+const { CreateIncident } = require('../src/application/usecases/CreateIncident');
 const { DomainError } = require('../src/domain/errors/DomainError');
 
 describe('Domain rules', () => {
@@ -121,5 +122,85 @@ describe('Domain rules', () => {
 
     expect(result.decision).toBe('CAT2');
     expect(result.reporterDecision).toBe('CAT1');
+  });
+
+  test('create incident on behalf keeps submitter out of voting participants', async () => {
+    const savedIncidents = [];
+    const incidentRepository = {
+      save: jest.fn(async ({ incident }) => {
+        savedIncidents.push(incident);
+        return incident;
+      })
+    };
+    const notificationPort = {
+      createIncidentThread: jest.fn().mockResolvedValue({ threadId: 'thread-1', messageId: 'msg-1' }),
+      addSheetFooter: jest.fn(),
+      sendGuiltyDm: jest.fn().mockResolvedValue({ channelId: 'dm-guilty' }),
+      sendReporterEvidenceDm: jest.fn().mockResolvedValue({
+        channelId: 'dm-reporter',
+        botMessageIds: ['bot-msg-1'],
+        promptMessageId: 'prompt-1'
+      }),
+      sendSubmitterConfirmationDm: jest.fn().mockResolvedValue({ channelId: 'dm-submitter' })
+    };
+    const workflowState = {
+      setPendingGuiltyReply: jest.fn(),
+      setPendingEvidence: jest.fn(),
+      clearPendingIncidentReport: jest.fn()
+    };
+    const createIncident = new CreateIncident({
+      incidentRepository,
+      notificationPort,
+      workflowState,
+      clock: { now: () => 1000 },
+      idGenerator: { nextIncidentNumber: jest.fn().mockResolvedValue('INC-1') }
+    });
+
+    await createIncident.execute({
+      pending: {
+        raceClass: 'GT3',
+        division: 'Div 1',
+        raceName: '3',
+        round: '12',
+        corner: 'Spa',
+        description: 'Incident',
+        reasonLabel: 'Contact',
+        reporterId: 'user-b',
+        reporterTag: 'driverB#0001',
+        guiltyId: 'user-c',
+        guiltyTag: 'driverC#0001',
+        submitterId: 'user-a',
+        submitterTag: 'driverA#0001'
+      },
+      evidenceWindowMs: 600000,
+      guiltyReplyWindowMs: 172800000,
+      fallbackEvidenceChannelId: 'report-channel',
+      evidenceUserId: 'user-b',
+      pendingOwnerId: 'user-a'
+    });
+
+    expect(savedIncidents[0]).toMatchObject({
+      reporterId: 'user-b',
+      guiltyId: 'user-c',
+      submitterId: 'user-a'
+    });
+    expect(notificationPort.createIncidentThread).toHaveBeenCalledWith(expect.objectContaining({
+      reporterId: 'user-b',
+      guiltyId: 'user-c',
+      submitterId: 'user-a'
+    }));
+    expect(notificationPort.sendReporterEvidenceDm).toHaveBeenCalledWith(expect.objectContaining({
+      reporterId: 'user-b'
+    }));
+    expect(notificationPort.sendGuiltyDm).toHaveBeenCalledWith(expect.objectContaining({
+      guiltyId: 'user-c'
+    }));
+    expect(notificationPort.sendSubmitterConfirmationDm).toHaveBeenCalledWith(expect.objectContaining({
+      submitterId: 'user-a'
+    }));
+    expect(workflowState.setPendingEvidence).toHaveBeenCalledWith(
+      'user-b',
+      expect.objectContaining({ incidentNumber: 'INC-1' })
+    );
   });
 });

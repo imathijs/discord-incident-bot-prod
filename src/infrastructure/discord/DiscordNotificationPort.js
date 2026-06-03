@@ -96,6 +96,7 @@ class DiscordNotificationPort {
     reporterTag,
     guiltyMention,
     reporterMention,
+    submitterMention,
     stewardNote
   }) {
     const fields = [
@@ -109,6 +110,9 @@ class DiscordNotificationPort {
       { name: '📌 Reden', value: reasonLabel || 'Onbekend' },
       { name: '📝 Beschrijving', value: description || 'Onbekend' }
     ];
+    if (submitterMention) {
+      fields.splice(1, 0, { name: '🧾 Aangemaakt door', value: submitterMention, inline: true });
+    }
     if (stewardNote) fields.push({ name: '⚠️ Opmerking', value: stewardNote });
     fields.push(
       { name: '\u200b', value: '\u200b' },
@@ -148,12 +152,20 @@ class DiscordNotificationPort {
       guiltyTag,
       reporterId,
       reporterTag,
+      submitterId,
+      submitterTag,
       stewardNote
     } = payload;
 
     const guiltyDriver = guiltyTag || 'Onbekend';
     const guiltyMention = guiltyId ? `<@${guiltyId}>` : guiltyDriver;
     const reporterMention = reporterId ? `<@${reporterId}>` : reporterTag || 'Onbekend';
+    const submitterMention =
+      submitterId && submitterId !== reporterId
+        ? `<@${submitterId}>`
+        : submitterTag && submitterTag !== reporterTag
+          ? submitterTag
+          : null;
 
     const maxLabelNameLength = 24;
     const truncateLabelName = (value) => {
@@ -175,6 +187,7 @@ class DiscordNotificationPort {
       reporterTag,
       guiltyMention,
       reporterMention,
+      submitterMention,
       stewardNote
     });
 
@@ -272,6 +285,14 @@ class DiscordNotificationPort {
       components: [buildEvidencePromptRow('incident')]
     });
     return { channelId: dmChannel.id, botMessageIds: [dmIntro.id], promptMessageId: dmIntro.id };
+  }
+
+  async sendSubmitterConfirmationDm({ submitterId, content }) {
+    const submitterUser = await this.client.users.fetch(submitterId).catch(() => null);
+    if (!submitterUser) return null;
+    const dmChannel = await submitterUser.createDM();
+    await dmChannel.send(content);
+    return { channelId: dmChannel.id };
   }
 }
 

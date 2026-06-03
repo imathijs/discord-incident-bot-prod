@@ -12,6 +12,8 @@ class Incident {
     this.description = props?.description || null;
     this.reporterId = props?.reporterId || null;
     this.reporterTag = props?.reporterTag || null;
+    this.submitterId = props?.submitterId || null;
+    this.submitterTag = props?.submitterTag || null;
     this.guiltyId = props?.guiltyId || null;
     this.guiltyTag = props?.guiltyTag || null;
     this.votes = props?.votes || {};

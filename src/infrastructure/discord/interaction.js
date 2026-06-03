@@ -700,6 +700,26 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     return rows;
   };
 
+  const buildReporterSelectRow = () =>
+    new ActionRowBuilder().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId(IDS.INCIDENT_REPORTER_SELECT)
+        .setPlaceholder('Selecteer de rijder namens wie je indient')
+        .setMaxValues(1)
+    );
+
+  const buildReporterChoiceRow = () =>
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(IDS.INCIDENT_REPORT_SELF)
+        .setLabel('Mezelf')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(IDS.INCIDENT_REPORT_OTHER)
+        .setLabel('Voor een ander')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
   const getRaceClassLabel = (value) =>
     raceClasses.find((raceClass) => raceClass.value === value)?.label || 'Onbekend';
 
@@ -713,30 +733,39 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     description,
     reasonLabel,
     guiltyMention,
-    reporterTag
-  }) =>
-    new EmbedBuilder()
+    reporterTag,
+    submitterTag
+  }) => {
+    const fields = [
+      { name: '🔢 Incidentnummer', value: incidentNumber || 'Onbekend', inline: true },
+      { name: '👤 Ingediend door', value: reporterTag || 'Onbekend', inline: true }
+    ];
+    if (submitterTag && submitterTag !== reporterTag) {
+      fields.push({ name: '🧾 Aangemaakt door', value: submitterTag, inline: true });
+    }
+    fields.push(
+      { name: '⚠️ Schuldige rijder', value: guiltyMention || 'Onbekend', inline: true },
+      { name: '📌 Reden', value: reasonLabel || 'Onbekend', inline: false },
+      { name: 'Klasse', value: raceClass || 'Onbekend', inline: true },
+      { name: '🏁 Divisie', value: division || 'Onbekend', inline: true },
+      { name: '🏁 Race', value: raceName || 'Onbekend', inline: true },
+      { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
+      { name: '🏁 Circuit', value: corner || 'Onbekend', inline: true },
+      { name: '📝 Beschrijving', value: description || 'Onbekend', inline: false },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
+        name: 'ℹ️ Let op',
+        value:
+          'Kies **Bewerken** om aan te passen of **Bevestigen** om te verzenden.\n' +
+          'Je kunt het bewijs hierna delen of uploaden.'
+      }
+    );
+
+    return new EmbedBuilder()
       .setColor('#FFA000')
       .setTitle(`✅ Controleer je incidentmelding - ${incidentNumber || 'Onbekend'}`)
-      .addFields(
-        { name: '🔢 Incidentnummer', value: incidentNumber || 'Onbekend', inline: true },
-        { name: '👤 Ingediend door', value: reporterTag || 'Onbekend', inline: true },
-        { name: '⚠️ Schuldige rijder', value: guiltyMention || 'Onbekend', inline: true },
-        { name: '📌 Reden', value: reasonLabel || 'Onbekend', inline: false },
-        { name: 'Klasse', value: raceClass || 'Onbekend', inline: true },
-        { name: '🏁 Divisie', value: division || 'Onbekend', inline: true },
-        { name: '🏁 Race', value: raceName || 'Onbekend', inline: true },
-        { name: '🔢 Ronde', value: round || 'Onbekend', inline: true },
-        { name: '🏁 Circuit', value: corner || 'Onbekend', inline: true },
-        { name: '📝 Beschrijving', value: description || 'Onbekend', inline: false },
-        { name: '\u200b', value: '\u200b', inline: false },
-        {
-          name: 'ℹ️ Let op',
-          value:
-            'Kies **Bewerken** om aan te passen of **Bevestigen** om te verzenden.\n' +
-            'Je kunt het bewijs hierna delen of uploaden.'
-        }
-      );
+      .addFields(...fields);
+  };
 
   const buildVoteBreakdown = (votes = {}, type = 'guilty') => {
     const entries = Object.entries(votes);
@@ -832,20 +861,24 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
     });
 
     try {
+      const evidenceUserId = pending.reporterId || interaction.user.id;
       const result = await createIncident.execute({
         pending: { ...pending, reasonLabel },
         stewardNote,
         evidenceWindowMs,
         guiltyReplyWindowMs,
         fallbackEvidenceChannelId: interaction.channelId,
-        evidenceUserId: interaction.user.id,
+        evidenceUserId,
         pendingOwnerId: interaction.user.id
       });
 
+      const submittedForOther = evidenceUserId !== interaction.user.id;
       await interaction.editReply({
-        content:
-          `🔔 Je incident-ticket **${result.incidentNumber}** is verzonden naar de stewards!\n` +
-          `Je hebt zojuist een DM ontvangen van de Bot. Upload of deel je bewijsmateriaal via de DM.`
+        content: submittedForOther
+          ? `🔔 Incident-ticket **${result.incidentNumber}** is verzonden naar de stewards!\n` +
+            `De gekozen rijder ontvangt de bewijs-DM. Jij ontvangt alleen een bevestiging met het ticketnummer.`
+          : `🔔 Je incident-ticket **${result.incidentNumber}** is verzonden naar de stewards!\n` +
+            `Je hebt zojuist een DM ontvangen van de Bot. Upload of deel je bewijsmateriaal via de DM.`
       });
     } catch (err) {
       if (err instanceof DomainError && err.code === 'MISSING_FIELDS') {
@@ -855,7 +888,7 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
       if (err instanceof DomainError && err.code === 'SELF_CULPRIT') {
         return interaction.editReply({
-          content: '❌ Je kan jezelf niet kiezen als schuldige rijder. Kies de tegenpartij.'
+          content: '❌ De indiener en schuldige rijder kunnen niet dezelfde gebruiker zijn. Kies de tegenpartij.'
         });
       }
       if (err?.code === 'VOTE_CHANNEL_MISSING') {
@@ -1444,6 +1477,13 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const selectedUserId = interaction.values[0];
+      if (selectedUserId === pending.reporterId) {
+        await interaction.reply({
+          content: '❌ De indiener en schuldige rijder kunnen niet dezelfde gebruiker zijn. Kies de tegenpartij.',
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
       const selectedUser = interaction.users.get(selectedUserId);
       pending.guiltyId = selectedUserId;
       pending.guiltyTag = selectedUser ? selectedUser.tag : 'Onbekend';
@@ -1465,11 +1505,19 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const existing = await store.getPendingIncidentReport(interaction.user.id);
+      if (!existing?.reporterId) {
+        await interaction.reply({
+          content: '❌ Kies eerst voor welke rijder je het incident indient.',
+          components: [buildReporterChoiceRow()],
+          flags: MessageFlags.Ephemeral
+        });
+        return true;
+      }
       await store.setPendingIncidentReport(interaction.user.id, {
         ...(existing || {}),
         reasonValue: interaction.values[0],
-        reporterTag: interaction.user.tag,
-        reporterId: interaction.user.id,
+        submitterTag: interaction.user.tag,
+        submitterId: interaction.user.id,
         guildId: interaction.guildId,
         expiresAt: Date.now() + incidentReportWindowMs
       });
@@ -1489,6 +1537,45 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       return true;
     }
 
+    if (interaction.isUserSelectMenu() && interaction.customId === IDS.INCIDENT_REPORTER_SELECT) {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
+      if (!pending) {
+        await interaction.reply({ content: '❌ Sessie verlopen. Begin opnieuw.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const selectedUserId = interaction.values[0];
+      if (selectedUserId === interaction.user.id) {
+        pending.expiresAt = Date.now() + incidentReportWindowMs;
+        await store.setPendingIncidentReport(interaction.user.id, pending);
+
+        await interaction.update({
+          content: '❌ Je hebt **Voor een ander** gekozen. Selecteer een andere rijder dan jezelf.',
+          components: [buildReporterSelectRow()]
+        });
+        return true;
+      }
+      const selectedUser = interaction.users.get(selectedUserId);
+      pending.reporterId = selectedUserId;
+      pending.reporterTag = selectedUser ? selectedUser.tag : `Onbekend (${selectedUserId})`;
+      pending.submitterId = pending.submitterId || interaction.user.id;
+      pending.submitterTag = pending.submitterTag || interaction.user.tag;
+      pending.expiresAt = Date.now() + incidentReportWindowMs;
+      await store.setPendingIncidentReport(interaction.user.id, pending);
+
+      const classRow = buildClassRow();
+      await interaction.update({
+        content: 'Welke race klasse?',
+        components: [classRow]
+      });
+      return true;
+    }
+
     // 3a) User Select submit: schuldige bewaren en modal tonen
     if (interaction.isUserSelectMenu() && interaction.customId === IDS.INCIDENT_CULPRIT_SELECT) {
       const pending = await store.getPendingIncidentReport(interaction.user.id);
@@ -1498,9 +1585,9 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       }
 
       const selectedUserId = interaction.values[0];
-      if (selectedUserId === interaction.user.id) {
+      if (selectedUserId === pending.reporterId) {
         await interaction.reply({
-          content: '❌ Je kan jezelf niet kiezen als schuldige rijder. Kies de tegenpartij.',
+          content: '❌ De indiener en schuldige rijder kunnen niet dezelfde gebruiker zijn. Kies de tegenpartij.',
           flags: MessageFlags.Ephemeral
         });
         return true;
@@ -1569,7 +1656,8 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         description,
         reasonLabel,
         guiltyMention,
-        reporterTag: pending.reporterTag
+        reporterTag: pending.reporterTag,
+        submitterTag: pending.submitterTag
       });
 
       const reviewButtons = new ActionRowBuilder().addComponents(
@@ -2223,11 +2311,16 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
         return true;
       }
 
-      const classRow = buildClassRow();
+      await store.setPendingIncidentReport(interaction.user.id, {
+        submitterTag: interaction.user.tag,
+        submitterId: interaction.user.id,
+        guildId: interaction.guildId,
+        expiresAt: Date.now() + incidentReportWindowMs
+      });
 
       await interaction.reply({
-        content: 'Welke race klasse?',
-        components: [classRow],
+        content: 'Dien je het incident voor jezelf of een andere rijder in?',
+        components: [buildReporterChoiceRow()],
         flags: MessageFlags.Ephemeral
       });
       return true;
@@ -2317,12 +2410,19 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const classValue = interaction.customId.split(':')[1] || '';
       const raceClass = getRaceClassLabel(classValue);
 
-      const existing = await store.getPendingIncidentReport(interaction.user.id);
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
+      if (!pending?.reporterId) {
+        await interaction.update({
+          content: 'Dien je het incident voor jezelf of een andere rijder in?',
+          components: [buildReporterChoiceRow()]
+        });
+        return true;
+      }
       await store.setPendingIncidentReport(interaction.user.id, {
-        ...(existing || {}),
+        ...pending,
         raceClass,
-        reporterTag: interaction.user.tag,
-        reporterId: interaction.user.id,
+        submitterTag: interaction.user.tag,
+        submitterId: interaction.user.id,
         guildId: interaction.guildId,
         expiresAt: Date.now() + incidentReportWindowMs
       });
@@ -2392,11 +2492,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       const division = divisionMap[divisionValue] || 'Onbekend';
 
       const existing = await store.getPendingIncidentReport(interaction.user.id);
+      if (!existing?.reporterId) {
+        await interaction.update({
+          content: 'Dien je het incident voor jezelf of een andere rijder in?',
+          components: [buildReporterChoiceRow()]
+        });
+        return true;
+      }
       await store.setPendingIncidentReport(interaction.user.id, {
         ...(existing || {}),
         division,
-        reporterTag: interaction.user.tag,
-        reporterId: interaction.user.id,
+        submitterTag: interaction.user.tag,
+        submitterId: interaction.user.id,
         guildId: interaction.guildId,
         expiresAt: Date.now() + incidentReportWindowMs
       });
@@ -2405,6 +2512,44 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
       await interaction.update({
         content: 'Kies de reden van het incident.',
         components: reasonRows
+      });
+      return true;
+    }
+
+    if (id === IDS.INCIDENT_REPORT_SELF || id === IDS.INCIDENT_REPORT_OTHER) {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: '❌ Meld een incident via het meld-kanaal.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const pending = await store.getPendingIncidentReport(interaction.user.id);
+      if (!pending) {
+        await interaction.reply({ content: '❌ Sessie verlopen. Begin opnieuw.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      pending.submitterTag = interaction.user.tag;
+      pending.submitterId = interaction.user.id;
+      pending.guildId = interaction.guildId;
+      pending.expiresAt = Date.now() + incidentReportWindowMs;
+
+      if (id === IDS.INCIDENT_REPORT_OTHER) {
+        await store.setPendingIncidentReport(interaction.user.id, pending);
+        await interaction.update({
+          content: 'Selecteer de rijder namens wie je dit incident indient.',
+          components: [buildReporterSelectRow()]
+        });
+        return true;
+      }
+
+      pending.reporterTag = interaction.user.tag;
+      pending.reporterId = interaction.user.id;
+      await store.setPendingIncidentReport(interaction.user.id, pending);
+
+      const classRow = buildClassRow();
+      await interaction.update({
+        content: 'Welke race klasse?',
+        components: [classRow]
       });
       return true;
     }
@@ -2529,11 +2674,18 @@ function registerInteractionHandlers(client, { config, state, generateIncidentNu
 
       const reasonValue = interaction.customId.split(':')[1] || '';
       const existing = await store.getPendingIncidentReport(interaction.user.id);
+      if (!existing?.reporterId) {
+        await interaction.update({
+          content: 'Dien je het incident voor jezelf of een andere rijder in?',
+          components: [buildReporterChoiceRow()]
+        });
+        return true;
+      }
       await store.setPendingIncidentReport(interaction.user.id, {
         ...(existing || {}),
         reasonValue,
-        reporterTag: interaction.user.tag,
-        reporterId: interaction.user.id,
+        submitterTag: interaction.user.tag,
+        submitterId: interaction.user.id,
         guildId: interaction.guildId,
         expiresAt: Date.now() + incidentReportWindowMs
       });
